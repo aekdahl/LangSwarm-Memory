@@ -1,50 +1,86 @@
 from chromadb import Client
 from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
-from .base import SharedMemoryBase
+import asyncio
+from threading import Lock
+from datetime import datetime
 
-class ChromaDBSharedMemory(SharedMemoryBase):
+class ChromaDBSharedMemory:
     """
-    ChromaDB-backed shared memory for vector search.
+    ChromaDB-backed shared memory with optional thread-safe and async-safe operations.
     """
 
-    def __init__(self, collection_name="shared_memory", persist_directory=None):
+    def __init__(self, collection_name="shared_memory", persist_directory=None, thread_safe=True, async_safe=False):
         """
-        Initialize ChromaDB client and collection.
+        Initialize ChromaDB client and thread/async locks.
 
         Parameters:
         - collection_name (str): Name of the ChromaDB collection.
         - persist_directory (str): Directory for ChromaDB persistence.
+        - thread_safe (bool): Enable thread-safe operations.
+        - async_safe (bool): Enable async-safe operations.
         """
         self.client = Client(Settings(persist_directory=persist_directory))
-        self.collection_name = collection_name
         self.collection = self.client.get_or_create_collection(name=collection_name)
+        self.thread_safe = thread_safe or async_safe
+
+        if self.thread_safe:
+            self.lock = asyncio.Lock() if async_safe else Lock()
+
+    def _get_default_metadata(self, metadata):
+        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        return {
+            "agent": metadata.get("agent"),
+            "timestamp": metadata.get("timestamp", now),
+            "llm": metadata.get("llm"),
+            "action": metadata.get("action"),
+            "confidence": metadata.get("confidence"),
+            "query": metadata.get("query"),
+        }
 
     def read(self, key=None):
         """
-        Fetch memory from ChromaDB.
+        Read memory from ChromaDB.
 
         Parameters:
-        - key: Optional key to fetch specific data.
+        - key (str): Key to fetch. If None, fetch all memory.
 
         Returns:
-        - The value for the key if specified, else all memory as a list of documents.
+        - List of documents if key is None, otherwise the specific document.
         """
-        if key:
-            results = self.collection.get(ids=[key])
-            return results["documents"][0] if results["documents"] else None
+        def _read():
+            if key:
+                result = self.collection.get(ids=[key])
+                if result["documents"]:
+                    return result["documents"][0]
+                return None
+            return self.collection.get()["documents"]
 
-        return self.collection.get()["documents"]
+        if self.thread_safe:
+            with self.lock:
+                return _read()
+        else:
+            return _read()
 
-    def write(self, key, value):
+    def write(self, key, value, metadata=None):
         """
-        Write data to ChromaDB.
+        Write a key-value pair to ChromaDB with metadata.
 
         Parameters:
-        - key (str): Key to associate with the value.
+        - key (str): Key to store.
         - value (str): Value to store.
+        - metadata (dict): Optional metadata.
         """
-        self.collection.add(ids=[key], documents=[value])
+        metadata = metadata or {}
+        entry_metadata = self._get_default_metadata(metadata)
+
+        def _write():
+            self.collection.add(ids=[key], documents=[value], metadatas=[entry_metadata])
+
+        if self.thread_safe:
+            with self.lock:
+                _write()
+        else:
+            _write()
 
     def delete(self, key):
         """
@@ -53,33 +89,46 @@ class ChromaDBSharedMemory(SharedMemoryBase):
         Parameters:
         - key (str): Key to delete.
         """
-        self.collection.delete(ids=[key])
+        def _delete():
+            self.collection.delete(ids=[key])
+
+        if self.thread_safe:
+            with self.lock:
+                _delete()
+        else:
+            _delete()
 
     def clear(self):
         """
-        Clear all documents in the collection.
+        Clear all entries in the ChromaDB collection.
         """
-        self.collection.delete()
+        def _clear():
+            self.collection.delete()
 
+        if self.thread_safe:
+            with self.lock:
+                _clear()
+        else:
+            _clear()
 
     def similarity_search(self, query, top_k=5):
         """
-        Perform similarity search on the stored vectors.
+        Perform similarity search in ChromaDB.
 
         Parameters:
         - query (str): Query string to search.
         - top_k (int): Number of top similar results to return.
 
         Returns:
-        - List of top-k most similar documents.
+        - List of top_k most similar documents.
         """
-        # Encode the query into a vector
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        query_vector = model.encode(query).tolist()
+        def _search():
+            query_vector = self.client.encode(query)
+            results = self.collection.query(query_embeddings=[query_vector], n_results=top_k)
+            return results["documents"]
 
-        # Search the ChromaDB collection
-        results = self.collection.query(
-            query_embeddings=[query_vector], n_results=top_k
-        )
-
-        return results["documents"]
+        if self.thread_safe:
+            with self.lock:
+                return _search()
+        else:
+            return _search()
