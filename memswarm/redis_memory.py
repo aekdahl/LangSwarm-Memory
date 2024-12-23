@@ -3,39 +3,6 @@ import asyncio
 from datetime import datetime
 from .base import SharedMemoryBase
 
-class RedisSharedMemory(SharedMemoryBase):
-    def write(self, value, metadata=None, context_id=None):
-        metadata = metadata or {}
-        timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-        key = f"{context_id}:{timestamp}"
-        entry = {"value": value, "metadata": self._get_default_metadata(metadata)}
-
-        def _write():
-            self.client.set(key, str(entry))
-
-        if self.thread_safe:
-            with self.lock:
-                _write()
-        else:
-            _write()
-
-    def read_context(self, context_id):
-        """
-        Read all entries for a given context_id in timestamp order.
-        """
-        def _read():
-            keys = sorted(self.client.keys(f"{context_id}:*"))
-            return {
-                key.decode(): eval(self.client.get(key).decode())
-                for key in keys
-            }
-
-        if self.thread_safe:
-            with self.lock:
-                return _read()
-        else:
-            return _read()
-
 
 class RedisSharedMemory(SharedMemoryBase):
     """
@@ -71,23 +38,15 @@ class RedisSharedMemory(SharedMemoryBase):
             "query": metadata.get("query"),
         }
 
-    def read(self, key=None):
+    def read_context(self, context_id):
         """
-        Read memory from Redis.
-
-        Parameters:
-        - key (str): Key to fetch. If None, fetch all memory.
-
-        Returns:
-        - The value for the key if specified, else all memory as a dictionary.
+        Read all entries for a given context_id in timestamp order.
         """
         def _read():
-            if key:
-                data = self.client.get(key)
-                return eval(data.decode()) if data else None
+            keys = sorted(self.client.keys(f"{context_id}:*"))
             return {
-                k.decode(): eval(self.client.get(k).decode())
-                for k in self.client.keys()
+                key.decode(): eval(self.client.get(key).decode())
+                for key in keys
             }
 
         if self.thread_safe:
@@ -96,20 +55,11 @@ class RedisSharedMemory(SharedMemoryBase):
         else:
             return _read()
 
-    def write(self, key, value, metadata=None):
-        """
-        Write a key-value pair to Redis with metadata.
-
-        Parameters:
-        - key (str): Key to store.
-        - value (str): Value to store.
-        - metadata (dict): Optional metadata.
-        """
+    def write(self, value, metadata=None, context_id=None):
         metadata = metadata or {}
-        entry = {
-            "value": value,
-            "metadata": self._get_default_metadata(metadata),
-        }
+        timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        key = f"{context_id}:{timestamp}"
+        entry = {"value": value, "metadata": self._get_default_metadata(metadata)}
 
         def _write():
             self.client.set(key, str(entry))
