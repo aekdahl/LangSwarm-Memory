@@ -1,172 +1,143 @@
-# MemSwarm
+# Hybrid Shared Memory System with Scoped Access
 
-# MemSwarm
-
-**MemSwarm** is a Python package designed to provide shared memory solutions for multi-agent systems and AI workflows. It offers flexible backends, including in-memory, persistent storage, and vector-based similarity search, enabling efficient data sharing and retrieval across agents.
-
----
-
-## **Key Features**
-
-1. **Shared Memory Management**
-   - Store, retrieve, and manage key-value pairs efficiently.
-   - Support for multiple storage backends: In-memory, Redis, Google Cloud Storage (GCS), and ChromaDB.
-
-2. **Similarity Search**
-   - Perform vector-based similarity search using ChromaDB.
-   - Enables Retrieval-Augmented Generation (RAG) workflows.
-
-3. **Persistence and Scalability**
-   - Persistent storage options for durability and recovery.
-   - Scalable solutions for distributed systems.
-
-4. **Hybrid Memory**
-   - Combines in-memory caching with persistent backends for optimal performance.
-
-5. **Extensibility**
-   - Modular design allows easy addition of new backends and features.
+## Overview
+This project provides a hybrid shared memory system combining multiple storage backends (e.g., in-memory, SQLite, Redis, ChromaDB, GCS) with dynamic scoping capabilities. It supports fine-grained access for individual agents and groups, enabling efficient and context-aware memory sharing in multi-agent systems.
 
 ---
 
-## **Installation**
+## Features
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-repo/memswarm.git
-   ```
-
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### Core Features
+- **Hybrid Memory**: Combines fast in-memory caching with persistent backends for durability.
+- **Dynamic Scoping**:
+  - Scoped reads and writes based on `agent_id`, `group_id`, and `context_id`.
+  - Granular control over memory visibility and organization.
+- **Multi-Backend Support**:
+  - **In-Memory**: Lightweight and fast.
+  - **SQLite**: Persistent, lightweight database.
+  - **Redis**: High-performance, distributed memory.
+  - **ChromaDB**: Vector-based memory with advanced metadata filtering.
+  - **Google Cloud Storage (GCS)**: Persistent cloud storage.
+- **Thread and Async Safety**: Ensures consistent operations in concurrent environments.
 
 ---
 
-## **Usage**
+## Installation
 
-### **Basic Shared Memory**
-#### In-Memory Implementation
+### Prerequisites
+- Python 3.8+
+- Install required packages:
+
+```bash
+pip install -r requirements.txt
+```
+
+### Requirements
+- For ChromaDB: Install `chromadb`
+- For Redis: Install `redis-py`
+- For GCS: Install `google-cloud-storage`
+
+---
+
+## Usage
+
+### Initialization
+
+#### In-Memory Backend
 ```python
-from memswarm.memory.in_memory import InMemorySharedMemory
+from memory_backends.in_memory import InMemorySharedMemory
 
-# Initialize shared memory
 memory = InMemorySharedMemory()
-
-# Write and read data
-memory.write("key1", "value1")
-print(memory.read("key1"))  # Output: 'value1'
-
-# Clear memory
-memory.clear()
 ```
 
-### **Persistent Storage with GCS**
+#### SQLite Backend
 ```python
-from memswarm.memory.gcs_memory import GCSSharedMemory
+from memory_backends.sqlite_memory import SQLiteSharedMemory
 
-# Initialize GCS shared memory
-gcs_memory = GCSSharedMemory(bucket_name="my-bucket")
-
-# Write and read data
-gcs_memory.write("key1", "value1")
-print(gcs_memory.read("key1"))  # Output: 'value1'
+memory = SQLiteSharedMemory(db_path="shared_memory.db")
 ```
 
-### **Similarity Search with ChromaDB**
+#### Hybrid Memory
 ```python
-from memswarm.memory.chromadb_memory import ChromaDBSharedMemory
+from memory_backends.hybrid_memory import HybridMemory
+from memory_backends.in_memory import InMemorySharedMemory
+from memory_backends.sqlite_memory import SQLiteSharedMemory
 
-# Initialize ChromaDB shared memory
-chroma_memory = ChromaDBSharedMemory(collection_name="example_collection")
+in_memory = InMemorySharedMemory()
+persistent = SQLiteSharedMemory(db_path="shared_memory.db")
 
-# Add documents
-chroma_memory.write("doc1", "This is a document about AI.")
-chroma_memory.write("doc2", "This document discusses machine learning.")
-
-# Perform similarity search
-results = chroma_memory.similarity_search("Tell me about AI", top_k=2)
-print(results)  # Output: ['This is a document about AI.', 'This document discusses machine learning.']
-```
-
-### **Hybrid Memory (In-Memory + Persistent Storage)**
-```python
-from memswarm.memory.hybrid_memory import HybridSharedMemory
-from memswarm.memory.in_memory import InMemorySharedMemory
-from memswarm.memory.gcs_memory import GCSSharedMemory
-
-# Initialize hybrid memory
-cache_memory = InMemorySharedMemory()
-persistent_memory = GCSSharedMemory(bucket_name="my-bucket")
-hybrid_memory = HybridSharedMemory(cache=cache_memory, backend=persistent_memory)
-
-# Write and read data
-hybrid_memory.write("key1", "value1")
-print(hybrid_memory.read("key1"))  # Output: 'value1'
-
-# Data is cached in-memory and persisted to GCS
+hybrid_memory = HybridMemory(in_memory, persistent)
 ```
 
 ---
 
-## **Hybrid Memory Implementation**
+### Write Scoped Entries
 
 ```python
-from .base import SharedMemoryBase
+hybrid_memory.write_scope(
+    value="The capital of France is Paris.",
+    metadata={"agent_id": "Agent1", "group_id": "GroupA"},
+    context_id="ctx_1234"
+)
 
-class HybridSharedMemory(SharedMemoryBase):
-    """
-    Hybrid memory combines in-memory caching with a persistent backend.
-    """
-
-    def __init__(self, cache, backend):
-        self.cache = cache
-        self.backend = backend
-
-    def read(self, key=None):
-        # Try reading from cache first
-        value = self.cache.read(key)
-        if value is not None:
-            return value
-
-        # Fallback to backend if not found in cache
-        value = self.backend.read(key)
-        if value is not None:
-            self.cache.write(key, value)  # Cache the result
-        return value
-
-    def write(self, key, value):
-        self.cache.write(key, value)
-        self.backend.write(key, value)
-
-    def delete(self, key):
-        self.cache.delete(key)
-        self.backend.delete(key)
-
-    def clear(self):
-        self.cache.clear()
-        self.backend.clear()
+hybrid_memory.write_scope(
+    value="France is in Europe.",
+    metadata={"agent_id": "Agent2", "group_id": "GroupA"},
+    context_id="ctx_1234"
+)
 ```
 
 ---
 
-## **Insights and Achievements**
+### Read Scoped Entries
 
-### **What MemSwarm Has Achieved**
+#### Read Entries for a Specific Agent
+```python
+agent_data = hybrid_memory.read_scope(agent_id="Agent1")
+print(agent_data)
+```
 
-1. **Cross-Agent Shared Memory**:
-   - MemSwarm facilitates data sharing across agents with multiple backends, ensuring interoperability and scalability.
+#### Read Entries for a Specific Group
+```python
+group_data = hybrid_memory.read_scope(group_id="GroupA")
+print(group_data)
+```
 
-2. **RAG-Ready Workflows**:
-   - With ChromaDB's similarity search, MemSwarm enables advanced AI workflows like RAG, making it highly suitable for modern AI systems.
+#### Read Entries for a Specific Context
+```python
+context_data = hybrid_memory.read_scope(context_id="ctx_1234")
+print(context_data)
+```
 
-3. **Hybrid Memory Advantage**:
-   - The hybrid memory implementation strikes a balance between speed (in-memory) and durability (persistent storage).
+#### Combine Scopes
+```python
+agent_context_data = hybrid_memory.read_scope(agent_id="Agent1", context_id="ctx_1234")
+print(agent_context_data)
+```
 
-4. **Extensibility and Modularity**:
-   - A well-designed, modular architecture allows seamless integration of new features and backends.
+---
 
-### **Is MemSwarm Truly a Cross-Agent Shared Memory Solution?**
-MemSwarm has made significant strides toward being a robust cross-agent shared memory solution. However, areas like dynamic memory scoping for individual agents and real-time pub/sub updates remain open for further development. Addressing these gaps will solidify MemSwarm's position as a leading solution in this domain.
+## Backend-Specific Features
+
+### In-Memory Shared Memory
+- Lightweight and fast.
+- Ideal for temporary or volatile data storage.
+
+### SQLite Shared Memory
+- Persistent storage for durable data.
+- Useful for small to medium datasets.
+
+### Redis Shared Memory
+- High-performance distributed memory.
+- Suitable for large-scale, real-time applications.
+
+### ChromaDB Shared Memory
+- Vector-based memory for similarity search.
+- Advanced metadata filtering.
+
+### Google Cloud Storage (GCS) Shared Memory
+- Persistent cloud-based storage.
+- Ideal for distributed systems with shared resources.
 
 ---
 
@@ -175,14 +146,29 @@ MemSwarm has made significant strides toward being a robust cross-agent shared m
 1. **Enhance Pub/Sub Capabilities**:
    - Enable real-time notifications for memory updates.
 
-2. **Agent-Specific Contexts**:
-   - Introduce scoped memory views for better privacy and collaboration.
+2. **Expand Backend Support**:
+   - Add new backends.
 
-3. **Expand Backend Support**:
-   - Add DynamoDB and SQLite as new backends.
-
-4. **Observability**:
+3. **Observability**:
    - Integrate logging and metrics for better debugging and monitoring.
 
 MemSwarm is poised to be the go-to solution for shared memory in multi-agent systems. Let us know your feedback and feature requests to shape its future!
 
+---
+
+## Future Enhancements
+- **Access Control**: Add `readable_by` and `writable_by` metadata for granular permission management.
+- **Dynamic Group Management**: Support for adding/removing agents from groups at runtime.
+- **Performance Optimization**: Benchmark and improve query performance for large-scale datasets.
+
+---
+
+## Contributing
+1. Fork the repository.
+2. Create a new branch for your feature.
+3. Submit a pull request with a detailed explanation.
+
+---
+
+## License
+This project is licensed under the MIT License.
