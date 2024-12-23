@@ -1,0 +1,7 @@
+redis
+chromadb
+google-cloud-storage
+sqlalchemy
+sentence-transformers
+scikit-learn
+pytest
