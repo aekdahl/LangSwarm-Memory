@@ -6,14 +6,20 @@ class SharedMemoryBase(ABC):
     """
 
     @abstractmethod
-    def read(self, key=None):
-        """Read the entire memory or a specific key."""
+    def read(self, key=None, context_id=None):
+        """
+        Read memory. If context_id is provided, fetch all entries in the context.
+
+        Parameters:
+        - key: Specific key to fetch (optional).
+        - context_id: Fetch all entries in the given context (optional).
+        """
         pass
 
     @abstractmethod
-    def write(self, key, value, metadata=None):
+    def write(self, key, value, metadata=None, context_id=None):
         """
-        Write a key-value pair to memory with optional metadata.
+        Write a key-value pair to memory with metadata and context_id.
 
         Parameters:
         - key (str): Key to store.
@@ -25,6 +31,7 @@ class SharedMemoryBase(ABC):
           - action (str): Optional action type (e.g., query, response).
           - confidence (float): Optional confidence score.
           - query (str): Optional original query leading to this entry.
+        - context_id: ID of the context (optional).
         """
         pass
 
