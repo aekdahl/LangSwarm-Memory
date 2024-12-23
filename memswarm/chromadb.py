@@ -1,5 +1,6 @@
 from chromadb import Client
 from chromadb.config import Settings
+from sentence_transformers import SentenceTransformer
 from .base import SharedMemoryBase
 
 class ChromaDBSharedMemory(SharedMemoryBase):
@@ -59,3 +60,26 @@ class ChromaDBSharedMemory(SharedMemoryBase):
         Clear all documents in the collection.
         """
         self.collection.delete()
+
+
+    def similarity_search(self, query, top_k=5):
+        """
+        Perform similarity search on the stored vectors.
+
+        Parameters:
+        - query (str): Query string to search.
+        - top_k (int): Number of top similar results to return.
+
+        Returns:
+        - List of top-k most similar documents.
+        """
+        # Encode the query into a vector
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        query_vector = model.encode(query).tolist()
+
+        # Search the ChromaDB collection
+        results = self.collection.query(
+            query_embeddings=[query_vector], n_results=top_k
+        )
+
+        return results["documents"]
