@@ -42,6 +42,28 @@ class InMemorySharedMemory(SharedMemoryBase):
             "query": metadata.get("query"),
         }
 
+    def read_scope(self, agent_id=None, group_id=None, context_id=None):
+        """
+        Read memory entries scoped to a specific agent, group, or context.
+        """
+        def _filter_scope():
+            result = {}
+            for key, entry in self.memory.items():
+                metadata = entry.get("metadata", {})
+                if context_id and not key.startswith(f"{context_id}:"):
+                    continue  # Skip entries not in the specified context
+                if agent_id and metadata.get("agent_id") == agent_id:
+                    result[key] = entry
+                elif group_id and metadata.get("group_id") == group_id:
+                    result[key] = entry
+            return result
+    
+        if self.thread_safe:
+            with self.lock:
+                return _filter_scope()
+        else:
+            return _filter_scope()
+
     def write_scope(self, value, metadata=None, context_id=None):
         metadata = metadata or {}
         timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
