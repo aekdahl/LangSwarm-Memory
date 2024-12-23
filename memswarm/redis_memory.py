@@ -38,6 +38,28 @@ class RedisSharedMemory(SharedMemoryBase):
             "query": metadata.get("query"),
         }
 
+    def read_scope(self, agent_id=None, group_id=None, context_id=None):
+        """
+        Read memory entries scoped to a specific agent, group, or context.
+        """
+        def _filter_scope():
+            keys = self.client.keys(f"{context_id}:*" if context_id else "*")
+            result = {}
+            for key in sorted(keys):  # Ensure lexicographical order
+                entry = eval(self.client.get(key).decode())
+                metadata = entry.get("metadata", {})
+                if agent_id and metadata.get("agent_id") == agent_id:
+                    result[key.decode()] = entry
+                elif group_id and metadata.get("group_id") == group_id:
+                    result[key.decode()] = entry
+            return result
+    
+        if self.thread_safe:
+            with self.lock:
+                return _filter_scope()
+        else:
+            return _filter_scope()
+
     def write_scope(self, value, metadata=None, context_id=None):
         metadata = metadata or {}
         timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
