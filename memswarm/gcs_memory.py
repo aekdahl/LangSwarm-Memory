@@ -44,6 +44,28 @@ class GCSSharedMemory(SharedMemoryBase):
             "query": metadata.get("query"),
         }
 
+    def read_scope(self, agent_id=None, group_id=None, context_id=None):
+        """
+        Read memory entries scoped to a specific agent, group, or context.
+        """
+        def _filter_scope():
+            blobs = sorted(self.client.list_blobs(self.bucket, prefix=f"{self.prefix}{context_id}:" if context_id else self.prefix))
+            result = {}
+            for blob in blobs:
+                entry = eval(blob.download_as_text())
+                metadata = entry.get("metadata", {})
+                if agent_id and metadata.get("agent_id") == agent_id:
+                    result[blob.name[len(self.prefix):]] = entry
+                elif group_id and metadata.get("group_id") == group_id:
+                    result[blob.name[len(self.prefix):]] = entry
+            return result
+    
+        if self.thread_safe:
+            with self.lock:
+                return _filter_scope()
+        else:
+            return _filter_scope()
+
     def write_scope(self, value, metadata=None, context_id=None):
         metadata = metadata or {}
         timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
