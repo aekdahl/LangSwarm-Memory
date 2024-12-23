@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime
 from .base import SharedMemoryBase
 
+
 class SQLiteSharedMemory(SharedMemoryBase):
     """
     SQLite-backed shared memory with optional thread-safe and async-safe operations.
@@ -57,32 +58,19 @@ class SQLiteSharedMemory(SharedMemoryBase):
             "query": metadata.get("query"),
         }
 
-    def read(self, key=None):
+    def read_context(self, context_id):
         """
-        Read memory from SQLite.
-
-        Parameters:
-        - key (str): Key to fetch. If None, fetch all memory.
-
-        Returns:
-        - The value for the key if specified, else all memory as a dictionary.
+        Read all entries for a given context_id in timestamp order.
         """
         def _read():
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                if key:
-                    cursor.execute("SELECT value, metadata FROM memory WHERE key = ?", (key,))
-                    row = cursor.fetchone()
-                    if row:
-                        return {"value": row[0], "metadata": eval(row[1])}
-                    return None
-                else:
-                    cursor.execute("SELECT key, value, metadata FROM memory")
-                    rows = cursor.fetchall()
-                    return {
-                        row[0]: {"value": row[1], "metadata": eval(row[2])}
-                        for row in rows
-                    }
+                cursor.execute("SELECT key, value, metadata FROM memory WHERE key LIKE ? ORDER BY key", (f"{context_id}:%",))
+                rows = cursor.fetchall()
+                return {
+                    row[0]: {"value": row[1], "metadata": eval(row[2])}
+                    for row in rows
+                }
 
         if self.thread_safe:
             with self.lock:
@@ -90,16 +78,10 @@ class SQLiteSharedMemory(SharedMemoryBase):
         else:
             return _read()
 
-    def write(self, key, value, metadata=None):
-        """
-        Write a key-value pair to SQLite with metadata.
-
-        Parameters:
-        - key (str): Key to store.
-        - value (str): Value to store.
-        - metadata (dict): Optional metadata.
-        """
+    def write(self, value, metadata=None, context_id=None):
         metadata = metadata or {}
+        timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        key = f"{context_id}:{timestamp}"
         entry_metadata = str(self._get_default_metadata(metadata))
 
         def _write():
