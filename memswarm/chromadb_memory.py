@@ -51,6 +51,70 @@ class ChromaDBSharedMemory:
             "query": metadata.get("query"),
         }
 
+    def write_scope(self, value, metadata=None, context_id=None):
+        """
+        Write a value to ChromaDB with metadata for agent, group, and context scoping.
+
+        Parameters:
+        - value (str): Value to store.
+        - metadata (dict): Metadata containing `agent_id` and `group_id`.
+        - context_id (str): Context ID for grouping entries.
+        """
+        metadata = metadata or {}
+        entry_id = self._generate_entry_id(context_id)
+        entry_metadata = {
+            "context_id": context_id,
+            "agent_id": metadata.get("agent_id"),
+            "group_id": metadata.get("group_id"),
+            "timestamp": entry_id.split(":")[1],  # Extract timestamp from the ID
+            **metadata,
+        }
+
+        def _write():
+            self.collection.add(ids=[entry_id], documents=[value], metadatas=[entry_metadata])
+
+        if self.thread_safe:
+            with self.lock:
+                _write()
+        else:
+            _write()
+
+    def read_scope(self, agent_id=None, group_id=None, context_id=None):
+        """
+        Read memory scoped to a specific agent, group, or context.
+
+        Parameters:
+        - agent_id (str): ID of the agent requesting the scope.
+        - group_id (str): ID of the group requesting the scope.
+        - context_id (str, optional): Restrict results to a specific context.
+
+        Returns:
+        - Dictionary of key-value pairs visible to the agent or group within the context.
+        """
+        def _read():
+            query_filter = {}
+            if context_id:
+                query_filter["context_id"] = context_id
+            if agent_id:
+                query_filter["agent_id"] = agent_id
+            if group_id:
+                query_filter["group_id"] = group_id
+
+            results = self.collection.get(where=query_filter, sort_by="timestamp", sort_order="asc")
+            return {
+                result_id: {
+                    "value": document,
+                    "metadata": metadata,
+                }
+                for result_id, document, metadata in zip(results["ids"], results["documents"], results["metadatas"])
+            }
+
+        if self.thread_safe:
+            with self.lock:
+                return _read()
+        else:
+            return _read()
+
     def read_context(self, context_id):
         """
         Read all entries for a given context_id, ordered by timestamp.
