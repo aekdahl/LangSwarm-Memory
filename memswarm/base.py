@@ -4,6 +4,33 @@ class SharedMemoryBase(ABC):
     """
     Abstract base class for shared memory implementations.
     """
+    
+    @abstractmethod
+    def read_scope(self, agent_id=None, group_id=None, context_id=None):
+        """
+        Read memory scoped to a specific agent, group, or context.
+
+        Parameters:
+        - agent_id (str): ID of the agent requesting the scope.
+        - group_id (str): ID of the group requesting the scope.
+        - context_id (str, optional): Restrict results to a specific context.
+
+        Returns:
+        - Filtered dictionary of key-value pairs visible to the agent or group within the context.
+        """
+        pass
+
+    @abstractmethod
+    def write_scope(self, value, metadata=None, context_id=None):
+        """
+        Write a value to memory with metadata for agent, group, or context scoping.
+
+        Parameters:
+        - value (str): Value to store.
+        - metadata (dict): Metadata containing `agent_id` and `group_id`.
+        - context_id (str): Context ID for grouping entries.
+        """
+        pass
 
     @abstractmethod
     def read(self, key=None, context_id=None):
