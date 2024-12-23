@@ -4,6 +4,40 @@ from datetime import datetime
 from .base import SharedMemoryBase
 
 class RedisSharedMemory(SharedMemoryBase):
+    def write(self, value, metadata=None, context_id=None):
+        metadata = metadata or {}
+        timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        key = f"{context_id}:{timestamp}"
+        entry = {"value": value, "metadata": self._get_default_metadata(metadata)}
+
+        def _write():
+            self.client.set(key, str(entry))
+
+        if self.thread_safe:
+            with self.lock:
+                _write()
+        else:
+            _write()
+
+    def read_context(self, context_id):
+        """
+        Read all entries for a given context_id in timestamp order.
+        """
+        def _read():
+            keys = sorted(self.client.keys(f"{context_id}:*"))
+            return {
+                key.decode(): eval(self.client.get(key).decode())
+                for key in keys
+            }
+
+        if self.thread_safe:
+            with self.lock:
+                return _read()
+        else:
+            return _read()
+
+
+class RedisSharedMemory(SharedMemoryBase):
     """
     Redis-backed shared memory with optional thread-safe and async-safe operations.
     """
