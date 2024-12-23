@@ -71,3 +71,6 @@ class GCSSharedMemory(SharedMemoryBase):
         blobs = self.client.list_blobs(self.bucket, prefix=self.prefix)
         for blob in blobs:
             blob.delete()
+
+    def similarity_search(self, query, top_k=5):
+        raise NotImplementedError("Similarity search is not supported for Google Cloud Storage.")
