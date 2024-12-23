@@ -2,12 +2,12 @@ from abc import ABC, abstractmethod
 
 class SharedMemoryBase(ABC):
     """
-    Abstract base class for shared memory.
+    Abstract base class for shared memory implementations.
     """
 
     @abstractmethod
-    def read(self):
-        """Read the entire memory."""
+    def read(self, key=None):
+        """Read the entire memory or a specific key."""
         pass
 
     @abstractmethod
