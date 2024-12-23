@@ -58,6 +58,32 @@ class SQLiteSharedMemory(SharedMemoryBase):
             "query": metadata.get("query"),
         }
 
+    def write_scope(self, value, metadata=None, context_id=None):
+        metadata = metadata or {}
+        timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        key = f"{context_id}:{timestamp}"
+        entry_metadata = str({
+            "agent_id": metadata.get("agent_id"),
+            "group_id": metadata.get("group_id"),
+            "timestamp": timestamp,
+            **metadata,
+        })
+
+        def _write():
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO memory (key, value, metadata)
+                    VALUES (?, ?, ?)
+                """, (key, value, entry_metadata))
+                conn.commit()
+
+        if self.thread_safe:
+            with self.lock:
+                _write()
+        else:
+            _write()
+
     def read_context(self, context_id):
         """
         Read all entries for a given context_id in timestamp order.
