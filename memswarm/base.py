@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from threading import Lock
 import asyncio
 
@@ -13,8 +14,21 @@ class SharedMemoryBase(ABC):
         pass
 
     @abstractmethod
-    def write(self, key, value):
-        """Write a key-value pair to memory."""
+    def write(self, key, value, metadata=None):
+        """
+        Write a key-value pair to memory with optional metadata.
+
+        Parameters:
+        - key (str): Key to store.
+        - value (str): Value to store.
+        - metadata (dict, optional): Metadata about the entry. Fields:
+          - agent (str): Agent identifier.
+          - timestamp (str): ISO 8601 timestamp (default: now).
+          - llm (str): Optional LLM used.
+          - action (str): Optional action type (e.g., query, response).
+          - confidence (float): Optional confidence score.
+          - query (str): Optional original query leading to this entry.
+        """
         pass
 
     @abstractmethod
