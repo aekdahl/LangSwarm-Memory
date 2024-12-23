@@ -41,6 +41,20 @@ class SharedMemoryBase(ABC):
         """Clear all memory."""
         pass
 
+    @abstractmethod
+    def similarity_search(self, query, top_k=5):
+        """
+        Perform similarity search on stored data.
+
+        Parameters:
+        - query (str): Query string to search.
+        - top_k (int): Number of top similar results to return.
+
+        Returns:
+        - List of most similar documents.
+        """
+        raise NotImplementedError("Similarity search is not supported for this backend.")
+
 
 class ThreadSafeSharedMemory(SharedMemoryBase):
     """
@@ -66,20 +80,6 @@ class ThreadSafeSharedMemory(SharedMemoryBase):
     def clear(self):
         with self.lock:
             self.memory.clear()
-
-    @abstractmethod
-    def similarity_search(self, query, top_k=5):
-        """
-        Perform similarity search on stored data.
-
-        Parameters:
-        - query (str): Query string to search.
-        - top_k (int): Number of top similar results to return.
-
-        Returns:
-        - List of most similar documents.
-        """
-        raise NotImplementedError("Similarity search is not supported for this backend.")
 
 
 class AsyncSafeSharedMemory(SharedMemoryBase):
