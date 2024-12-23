@@ -9,7 +9,9 @@ class RedisSharedMemory(SharedMemoryBase):
     def __init__(self, redis_url="redis://localhost:6379/0"):
         self.client = redis.StrictRedis.from_url(redis_url)
 
-    def read(self):
+    def read(self, key=None):
+        if key:
+            return self.client.get(key).decode() if self.client.get(key) else None
         return {key.decode(): self.client.get(key).decode() for key in self.client.keys()}
 
     def write(self, key, value):
@@ -20,3 +22,4 @@ class RedisSharedMemory(SharedMemoryBase):
 
     def clear(self):
         self.client.flushdb()
+
