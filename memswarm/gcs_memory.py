@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime
 from .base import SharedMemoryBase
 
+
 class GCSSharedMemory(SharedMemoryBase):
     """
     Google Cloud Storage (GCS)-backed shared memory with optional thread-safe and async-safe operations.
@@ -43,25 +44,16 @@ class GCSSharedMemory(SharedMemoryBase):
             "query": metadata.get("query"),
         }
 
-    def read(self, key=None):
+    def read_context(self, context_id):
         """
-        Read memory from GCS.
-
-        Parameters:
-        - key (str): Key to fetch. If None, fetch all memory.
-
-        Returns:
-        - The value for the key if specified, else all memory as a dictionary.
+        Read all entries for a given context_id in timestamp order.
         """
         def _read():
-            if key:
-                blob = self._get_blob(key)
-                if not blob.exists():
-                    return None
-                return eval(blob.download_as_text())
-
-            blobs = self.client.list_blobs(self.bucket, prefix=self.prefix)
-            return {b.name[len(self.prefix):]: eval(b.download_as_text()) for b in blobs}
+            blobs = sorted(self.client.list_blobs(self.bucket, prefix=f"{self.prefix}{context_id}:"))
+            return {
+                blob.name[len(self.prefix):]: eval(blob.download_as_text())
+                for blob in blobs
+            }
 
         if self.thread_safe:
             with self.lock:
@@ -69,20 +61,11 @@ class GCSSharedMemory(SharedMemoryBase):
         else:
             return _read()
 
-    def write(self, key, value, metadata=None):
-        """
-        Write a key-value pair to GCS with metadata.
-
-        Parameters:
-        - key (str): Key to store.
-        - value (str): Value to store.
-        - metadata (dict): Optional metadata.
-        """
+    def write(self, value, metadata=None, context_id=None):
         metadata = metadata or {}
-        entry = {
-            "value": value,
-            "metadata": self._get_default_metadata(metadata),
-        }
+        timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        key = f"{context_id}:{timestamp}"
+        entry = {"value": value, "metadata": self._get_default_metadata(metadata)}
 
         def _write():
             blob = self._get_blob(key)
