@@ -7,6 +7,7 @@ except ImportError:
     cosine_similarity = None
     SentenceTransformer = None
 
+import asyncio
 from threading import Lock
 from datetime import datetime
             
@@ -15,12 +16,15 @@ class InMemorySharedMemory(SharedMemoryBase):
     A basic in-memory implementation of shared memory.
     """
 
-    def __init__(self, thread_safe = True):
+    def __init__(self, thread_safe = True, async_safe = False):
         self.memory = {}
-        self.thread_safe = thread_safe
+        self.thread_safe = thread_safe or async_safe
         
         if self.thread_safe:
-            self.lock = Lock()
+            if async_safe:
+                self.lock = asyncio.Lock()
+            else:
+                self.lock = Lock()
 
         if SentenceTransformer:
             self.model = SentenceTransformer("all-MiniLM-L6-v2")
