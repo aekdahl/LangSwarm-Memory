@@ -4,6 +4,13 @@ import asyncio
 from threading import Lock
 from datetime import datetime
 
+from chromadb import Client
+from chromadb.config import Settings
+from datetime import datetime
+import asyncio
+from threading import Lock
+
+
 class ChromaDBSharedMemory:
     """
     ChromaDB-backed shared memory with optional thread-safe and async-safe operations.
@@ -26,6 +33,13 @@ class ChromaDBSharedMemory:
         if self.thread_safe:
             self.lock = asyncio.Lock() if async_safe else Lock()
 
+    def _generate_entry_id(self, context_id):
+        """
+        Generate a unique ID for an entry using context_id and timestamp.
+        """
+        timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        return f"{context_id}:{timestamp}"
+
     def _get_default_metadata(self, metadata):
         now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         return {
@@ -37,23 +51,29 @@ class ChromaDBSharedMemory:
             "query": metadata.get("query"),
         }
 
-    def read(self, key=None):
+    def read_context(self, context_id):
         """
-        Read memory from ChromaDB.
+        Read all entries for a given context_id, ordered by timestamp.
 
         Parameters:
-        - key (str): Key to fetch. If None, fetch all memory.
+        - context_id (str): The context ID to fetch.
 
         Returns:
-        - List of documents if key is None, otherwise the specific document.
+        - Ordered dictionary of key-value pairs.
         """
         def _read():
-            if key:
-                result = self.collection.get(ids=[key])
-                if result["documents"]:
-                    return result["documents"][0]
-                return None
-            return self.collection.get()["documents"]
+            results = self.collection.get(
+                where={"context_id": context_id},
+                sort_by="timestamp",
+                sort_order="asc"
+            )
+            return {
+                result_id: {
+                    "value": document,
+                    "metadata": metadata
+                }
+                for result_id, document, metadata in zip(results["ids"], results["documents"], results["metadatas"])
+            }
 
         if self.thread_safe:
             with self.lock:
@@ -61,20 +81,25 @@ class ChromaDBSharedMemory:
         else:
             return _read()
 
-    def write(self, key, value, metadata=None):
+    def write(self, value, metadata=None, context_id=None):
         """
-        Write a key-value pair to ChromaDB with metadata.
+        Write a value to ChromaDB with metadata and context_id.
 
         Parameters:
-        - key (str): Key to store.
         - value (str): Value to store.
         - metadata (dict): Optional metadata.
+        - context_id (str): Context ID for grouping entries.
         """
         metadata = metadata or {}
-        entry_metadata = self._get_default_metadata(metadata)
+        entry_id = self._generate_entry_id(context_id)
+        entry_metadata = {
+            **metadata,
+            "context_id": context_id,
+            "timestamp": entry_id.split(":")[1],  # Extract timestamp from the ID
+        }
 
         def _write():
-            self.collection.add(ids=[key], documents=[value], metadatas=[entry_metadata])
+            self.collection.add(ids=[entry_id], documents=[value], metadatas=[entry_metadata])
 
         if self.thread_safe:
             with self.lock:
@@ -82,15 +107,15 @@ class ChromaDBSharedMemory:
         else:
             _write()
 
-    def delete(self, key):
+    def delete_context(self, context_id):
         """
-        Delete a key in ChromaDB.
+        Delete all entries for a given context_id.
 
         Parameters:
-        - key (str): Key to delete.
+        - context_id (str): The context ID to delete.
         """
         def _delete():
-            self.collection.delete(ids=[key])
+            self.collection.delete(where={"context_id": context_id})
 
         if self.thread_safe:
             with self.lock:
