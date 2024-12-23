@@ -1,5 +1,10 @@
 # Hybrid Shared Memory System with Scoped Access
 
+[![PyPI version](https://badge.fury.io/py/memswarm.svg)](https://badge.fury.io/py/memswarm)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+<!-- [![Tests](https://github.com/aekdahl/memswarm/workflows/tests/badge.svg)](https://github.com/aekdahl/memswarm/actions)-->
+
+
 ## Overview
 This project provides a hybrid shared memory system combining multiple storage backends (e.g., in-memory, SQLite, Redis, ChromaDB, GCS) with dynamic scoping capabilities. It supports fine-grained access for individual agents and groups, enabling efficient and context-aware memory sharing in multi-agent systems.
 
