@@ -40,3 +40,12 @@ class InMemorySharedMemory(SharedMemoryBase):
         Clear all memory.
         """
         self.memory.clear()
+
+    def similarity_search(self, query, top_k=5):
+        query_vector = self.model.encode(query)
+        similarities = {
+            key: cosine_similarity([query_vector], [vector])[0][0]
+            for key, vector in self.embeddings.items()
+        }
+        sorted_keys = sorted(similarities, key=similarities.get, reverse=True)
+        return [(key, similarities[key]) for key in sorted_keys[:top_k]]
