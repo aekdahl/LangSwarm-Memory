@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from threading import Lock
+import asyncio
 
 class SharedMemoryBase(ABC):
     """
@@ -51,3 +52,30 @@ class ThreadSafeSharedMemory(SharedMemoryBase):
     def clear(self):
         with self.lock:
             self.memory.clear()
+
+
+class AsyncSafeSharedMemory(SharedMemoryBase):
+    """
+    An async-safe wrapper for shared memory implementations.
+    """
+
+    def __init__(self, memory: SharedMemoryBase):
+        self.memory = memory
+        self.lock = asyncio.Lock()
+
+    async def read(self, key=None):
+        async with self.lock:
+            return self.memory.read(key)
+
+    async def write(self, key, value):
+        async with self.lock:
+            self.memory.write(key, value)
+
+    async def delete(self, key):
+        async with self.lock:
+            self.memory.delete(key)
+
+    async def clear(self):
+        async with self.lock:
+            self.memory.clear()
+
