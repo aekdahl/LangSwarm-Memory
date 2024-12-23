@@ -38,6 +38,27 @@ class RedisSharedMemory(SharedMemoryBase):
             "query": metadata.get("query"),
         }
 
+    def write_scope(self, value, metadata=None, context_id=None):
+        metadata = metadata or {}
+        timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        key = f"{context_id}:{timestamp}"
+        entry_metadata = {
+            "agent_id": metadata.get("agent_id"),
+            "group_id": metadata.get("group_id"),
+            "timestamp": timestamp,
+            **metadata,
+        }
+        entry = {"value": value, "metadata": entry_metadata}
+
+        def _write():
+            self.client.set(key, str(entry))
+
+        if self.thread_safe:
+            with self.lock:
+                _write()
+        else:
+            _write()
+
     def read_context(self, context_id):
         """
         Read all entries for a given context_id in timestamp order.
