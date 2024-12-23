@@ -58,6 +58,40 @@ class SQLiteSharedMemory(SharedMemoryBase):
             "query": metadata.get("query"),
         }
 
+    def read_scope(self, agent_id=None, group_id=None, context_id=None):
+        """
+        Read memory entries scoped to a specific agent, group, or context.
+        """
+        def _filter_scope():
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                query = "SELECT key, value, metadata FROM memory WHERE 1=1"
+                params = []
+    
+                if context_id:
+                    query += " AND key LIKE ?"
+                    params.append(f"{context_id}:%")
+                if agent_id:
+                    query += " AND metadata LIKE ?"
+                    params.append(f'%\"agent_id\": \"{agent_id}\"%')
+                if group_id:
+                    query += " AND metadata LIKE ?"
+                    params.append(f'%\"group_id\": \"{group_id}\"%')
+    
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                result = {
+                    row[0]: {"value": row[1], "metadata": eval(row[2])}
+                    for row in rows
+                }
+                return result
+    
+        if self.thread_safe:
+            with self.lock:
+                return _filter_scope()
+        else:
+            return _filter_scope()
+
     def write_scope(self, value, metadata=None, context_id=None):
         metadata = metadata or {}
         timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
