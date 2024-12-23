@@ -10,7 +10,8 @@ except ImportError:
 import asyncio
 from threading import Lock
 from datetime import datetime
-            
+
+
 class InMemorySharedMemory(SharedMemoryBase):
     """
     A basic in-memory implementation of shared memory.
@@ -41,44 +42,34 @@ class InMemorySharedMemory(SharedMemoryBase):
             "query": metadata.get("query"),
         }
 
-    def read(self, key=None):
+    def read_context(self, context_id):
         """
-        Read the memory.
-
-        Parameters:
-        - key: Optional key to fetch specific data. If None, fetch all memory.
-
-        Returns:
-        - The value for the key if specified, else all memory as a dictionary.
+        Read all entries for a given context_id in timestamp order.
         """
+        def _read():
+            return {
+                key: value
+                for key, value in sorted(self.memory.items())
+                if key.startswith(f"{context_id}:")
+            }
+
         if self.thread_safe:
             with self.lock:
-                if key:
-                    return self.memory.get(key)
-                return self.memory.copy()
+                return _read()
         else:
-        if key:
-            return self.memory.get(key)
-        return self.memory.copy()
-            
-    def write(self, key, value, metadata=None):
-        """
-        Write a key-value pair to memory.
-        """
+            return _read()
+
+    def write(self, value, metadata=None, context_id=None):
         metadata = metadata or {}
-        _value = {
-            "value": value,
-            "metadata": self._get_default_metadata(metadata),
-        }
+        timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        key = f"{context_id}:{timestamp}"
+        entry = {"value": value, "metadata": self._get_default_metadata(metadata)}
+
         if self.thread_safe:
             with self.lock:
-                self.memory[key] = _value
-                if SentenceTransformer:
-                    self.embeddings[key] = self.model.encode(_value)
+                self.memory[key] = entry
         else:
-            self.memory[key] = _value
-            if SentenceTransformer:
-                self.embeddings[key] = self.model.encode(_value)
+            self.memory[key] = entry
             
     def delete(self, key):
         """
