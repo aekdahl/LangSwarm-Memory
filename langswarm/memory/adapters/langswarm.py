@@ -1,10 +1,18 @@
 from langswarm.memory.adapters.database_adapter import DatabaseAdapter
+
+try:
+    import sqlite3
+except ImportError:
+    sqlite3 = None
+    
 import sqlite3
 import redis
 from chromadb import Client
 from chromadb.config import Settings
 from google.cloud import storage
 
+from elasticsearch import Elasticsearch
+from typing import Dict  # For typing annotations
 
 class SQLiteAdapter(DatabaseAdapter):
     def __init__(self, db_path="memory.db"):
@@ -187,4 +195,45 @@ class GCSAdapter(DatabaseAdapter):
             "vector_search": False,  # GCS is a storage solution, not a vector database.
             "metadata_filtering": True,  # Metadata filtering implemented via stored metadata.
             "semantic_search": False,  # Semantic capabilities not supported natively.
+        }
+
+
+class ElasticsearchAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if Elasticsearch:
+            self.db = Elasticsearch(kwargs["connection_string"])
+        else:
+            raise ValueError("Elasticsearch package is not installed.")
+
+    def add_documents(self, documents):
+        for doc in documents:
+            self.db.index(index="documents", body={"text": doc["text"], "metadata": doc.get("metadata", {})})
+
+    def add_documents_with_metadata(self, documents, metadata):
+        for doc, meta in zip(documents, metadata):
+            self.db.index(index="documents", body={"text": doc, "metadata": meta})
+
+    def query(self, query, filters=None):
+        body = {"query": {"match": {"text": query}}}
+        if filters:
+            body["query"] = {"bool": {"must": [{"match": {"text": query}}], "filter": [{"term": filters}]}}
+        return self.db.search(index="documents", body=body)
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        body = {"query": {"bool": {"filter": [{"term": metadata_query}]}}}
+        return self.db.search(index="documents", body=body, size=top_k)
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.db.delete(index="documents", id=doc_id)
+
+    def delete_by_metadata(self, metadata_query):
+        body = {"query": {"bool": {"filter": [{"term": metadata_query}]}}}
+        self.db.delete_by_query(index="documents", body=body)
+
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,  # Elasticsearch supports vector search with extensions like dense_vector.
+            "metadata_filtering": True,  # Strong metadata filtering capabilities.
+            "semantic_search": True,  # Can be configured for semantic search using embeddings.
         }
