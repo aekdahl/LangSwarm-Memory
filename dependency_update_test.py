@@ -84,6 +84,8 @@ def update_requirements_with_python_versions(dependency_versions, python_version
     # Sort for consistency
     supported_versions = sorted(supported_versions)
 
+    print("dependency_versions", dependency_versions)
+
     with open("requirements.txt", "w") as f:
         # Add the comment about supported Python versions
         f.write(f"# Supported versions of Python: {', '.join(supported_versions)}\n")
@@ -137,11 +139,14 @@ def main(python_version):
         print("requirements.txt not found.")
         sys.exit(1)
 
+    print("Identified dependencies", dependencies)
     success = True  # Track whether all tests passed
     core, success = assign_versions(dependencies["core"], success)
     optional, success = assign_versions(dependencies["optional"], success)
     latest_versions = {"core": core, "optional": optional}
-    
+
+    print("latest_versions", latest_versions)
+
     # Update requirements.txt with compatible versions and supported Python versions
     update_requirements_with_python_versions(latest_versions, python_version, success)
 
