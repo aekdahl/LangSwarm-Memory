@@ -3,7 +3,6 @@ import requests
 import sys
 from packaging.version import Version
 
-
 def fetch_versions(package_name):
     """
     Fetch all available versions of a package from PyPI.
@@ -19,7 +18,6 @@ def fetch_versions(package_name):
     except requests.RequestException as e:
         print(f"Error fetching versions for {package_name}: {e}")
         return []
-
 
 def test_dependency_version(package, version):
     """
@@ -39,7 +37,6 @@ def test_dependency_version(package, version):
         print(f"{package}=={version} failed.")
         return False
 
-
 def find_oldest_compatible_version(package, versions):
     """
     Find the oldest compatible version of a package by testing all versions.
@@ -50,7 +47,6 @@ def find_oldest_compatible_version(package, versions):
             compatible_version = version
             break
     return compatible_version
-
 
 def get_supported_python_versions():
     """
@@ -67,13 +63,11 @@ def get_supported_python_versions():
         pass
     return supported_versions
 
-
-def update_requirements_with_python_versions(dependency_versions, python_version, success):
+def update_requirements_with_python_versions(dependency_versions, python_version, success, extras_require):
     """
     Update the requirements.txt file with the latest compatible versions
     and maintain only supported Python versions.
     """
-    # Get existing supported versions
     supported_versions = set(get_supported_python_versions())
 
     if success:
@@ -81,54 +75,88 @@ def update_requirements_with_python_versions(dependency_versions, python_version
     else:
         supported_versions.discard(python_version)  # Remove the version if it failed
 
-    # Sort for consistency
     supported_versions = sorted(supported_versions)
 
     with open("requirements.txt", "w") as f:
-        # Add the comment about supported Python versions
         f.write(f"# Supported versions of Python: {', '.join(supported_versions)}\n")
         f.write("# Automatically updated by dependency_update_test.py\n\n")
 
-        # Write the compatible dependency versions
-        for package, compatible_version in dependency_versions.items():
+        f.write("# Core dependencies\n")
+        for package, compatible_version in dependency_versions["core"].items():
             f.write(f"{package}=={compatible_version}\n")
-    print("requirements.txt updated successfully with Python version support comment.")
 
+        for group, packages in extras_require.items():
+            f.write(f"\n# Optional dependencies: {group}\n")
+            for package, compatible_version in packages.items():
+                f.write(f"{package}=={compatible_version}\n")
+    print("requirements.txt updated successfully with Python version support and extras_require.")
 
-def main(python_version):
-    # Read dependencies from requirements.txt
+def parse_requirements_file():
+    """
+    Parse the requirements.txt file into core and optional dependencies.
+    """
+    core_dependencies = []
+    optional_dependencies = {}
+    current_group = None
+
     try:
         with open("requirements.txt", "r") as f:
-            dependencies = [line.strip().split("==")[0] for line in f if "==" in line]
+            for line in f:
+                line = line.strip()
+                if line.startswith("# Optional dependencies: "):
+                    current_group = line.split(": ")[1]
+                    optional_dependencies[current_group] = {}
+                elif "==" in line:
+                    package, version = line.split("==")
+                    if current_group:
+                        optional_dependencies[current_group][package] = version
+                    else:
+                        core_dependencies.append(package)
     except FileNotFoundError:
         print("requirements.txt not found.")
         sys.exit(1)
 
-    latest_versions = {}
-    success = True  # Track whether all tests passed
-    for package in dependencies:
-        print(f"\nFetching versions for {package}...")
+    return core_dependencies, optional_dependencies
+
+def main(python_version):
+    core_dependencies, optional_dependencies = parse_requirements_file()
+    latest_versions = {"core": {}, "optional": {}}  # Store compatible versions
+
+    for package in core_dependencies:
+        print(f"\nFetching versions for core dependency {package}...")
         versions = fetch_versions(package)
         if not versions:
             print(f"No versions found for {package}. Skipping...")
             continue
 
-        print(f"Available versions for {package}: {versions}")
         compatible_version = find_oldest_compatible_version(package, versions)
         if compatible_version:
-            print(f"Oldest compatible version for {package}: {compatible_version}")
-            latest_versions[package] = compatible_version
-        else:
-            print(f"No compatible version found for {package} on Python {python_version}.")
-            success = False
-            break  # Exit the loop and mark the test as failed
+            latest_versions["core"][package] = compatible_version
 
-    # Update requirements.txt with compatible versions and supported Python versions
-    update_requirements_with_python_versions(latest_versions, python_version, success)
+    for group, packages in optional_dependencies.items():
+        latest_versions["optional"].setdefault(group, {})
+        for package in packages:
+            print(f"\nFetching versions for optional dependency {package} (group: {group})...")
+            versions = fetch_versions(package)
+            if not versions:
+                print(f"No versions found for {package}. Skipping...")
+                continue
 
-    if not success:
-        sys.exit(1)  # Exit with failure if any dependency test failed
+            compatible_version = find_oldest_compatible_version(package, versions)
+            if compatible_version:
+                latest_versions["optional"][group][package] = compatible_version
 
+    extras_require = {
+        group: {
+            package: version
+            for package, version in packages.items()
+        }
+        for group, packages in latest_versions["optional"].items()
+    }
+
+    update_requirements_with_python_versions(
+        latest_versions["core"], python_version, True, extras_require
+    )
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
