@@ -95,8 +95,8 @@ def parse_requirements_file():
     """
     Parse the requirements.txt file into core and optional dependencies.
     """
-    core_dependencies = []
-    optional_dependencies = {}
+
+    dependencies = {'core': [], 'optional': []}
     current_group = None
 
     try:
@@ -104,25 +104,24 @@ def parse_requirements_file():
             for line in f:
                 line = line.strip()
                 if line.startswith("# Optional dependencies: "):
-                    current_group = line.split(": ")[1]
-                    optional_dependencies[current_group] = {}
+                    current_group = 'optional'
                 elif "==" in line:
                     package, version = line.split("==")
                     if current_group:
-                        optional_dependencies[current_group][package] = version
+                        dependencies['optional'].append(package)
                     else:
-                        core_dependencies.append(package)
+                        dependencies['core'].append(package)
     except FileNotFoundError:
         print("requirements.txt not found.")
         sys.exit(1)
 
-    return core_dependencies, optional_dependencies
+    return dependencies
 
 def main(python_version):
-    core_dependencies, optional_dependencies = parse_requirements_file()
+    dependencies = parse_requirements_file()
     latest_versions = {"core": {}, "optional": {}}  # Store compatible versions
 
-    for package in core_dependencies:
+    for package in dependencies['core']:
         print(f"\nFetching versions for core dependency {package}...")
         versions = fetch_versions(package)
         if not versions:
@@ -133,18 +132,16 @@ def main(python_version):
         if compatible_version:
             latest_versions["core"][package] = compatible_version
 
-    for group, packages in optional_dependencies.items():
-        latest_versions["optional"].setdefault(group, {})
-        for package in packages:
-            print(f"\nFetching versions for optional dependency {package} (group: {group})...")
-            versions = fetch_versions(package)
-            if not versions:
-                print(f"No versions found for {package}. Skipping...")
-                continue
+    for package in dependencies['core']:
+        print(f"\nFetching versions for optional dependency {package} (group: {group})...")
+        versions = fetch_versions(package)
+        if not versions:
+            print(f"No versions found for {package}. Skipping...")
+            continue
 
-            compatible_version = find_oldest_compatible_version(package, versions)
-            if compatible_version:
-                latest_versions["optional"][group][package] = compatible_version
+        compatible_version = find_oldest_compatible_version(package, versions)
+        if compatible_version:
+            latest_versions["optional"][package] = compatible_version
 
     extras_require = {
         group: {
