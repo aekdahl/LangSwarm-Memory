@@ -42,16 +42,51 @@ Thread-Safe Operations: Ensuring safe concurrent access to shared memory.
 Multi-Backend Orchestration: Allowing flexible switching and management of memory backends (e.g., FAISS, Pinecone, Elasticsearch).
 """
 class SharedMemoryManager:
-    def __init__(self, backends, thread_safe=True):
+    def __init__(self, backend_configs, thread_safe=True):
         """
         Initializes the shared memory manager.
-        
+
         Args:
-            backends (list): List of backend adapters to use.
+            backend_configs (list): List of backend configurations. Each entry specifies the backend type 
+                                    (e.g., "faiss", "pinecone") and its parameters.
             thread_safe (bool): Whether to make the manager thread-safe.
         """
-        self.backends = backends
+        self.backends = self._initialize_backends(backend_configs)
         self.lock = threading.RLock() if thread_safe else None
+
+    def _initialize_backends(self, backend_configs):
+        """
+        Initializes memory backends based on configurations.
+
+        Args:
+            backend_configs (list): List of configurations for each backend.
+
+        Returns:
+            list: List of initialized backend instances.
+        """
+        initialized_backends = []
+        for config in backend_configs:
+            if config["type"] == "faiss":
+                initialized_backends.append(FaissAdapter(**config.get("params", {})))
+            elif config["type"] == "pinecone":
+                initialized_backends.append(PineconeAdapter(**config.get("params", {})))
+            else:
+                raise ValueError(f"Unsupported backend type: {config['type']}")
+        return initialized_backends
+
+    def _example_usage(self):
+        """
+        Example usage of the SharedMemoryManager.
+        """
+        backend_configs = [
+            {"type": "faiss", "params": {"dimension": 128}},
+            {"type": "pinecone", "params": {"api_key": "your-api-key", "environment": "us-west1"}}
+        ]
+        manager = SharedMemoryManager(backend_configs)
+        documents = [{"text": "Document 1"}, {"text": "Document 2"}]
+        manager.add_documents(documents)
+        results = manager.query("query text")
+        print("Results:", results)
 
     def _thread_safe(method):
         """Decorator to add thread-safety to methods if enabled."""
