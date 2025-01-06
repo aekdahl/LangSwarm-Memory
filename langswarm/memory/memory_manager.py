@@ -1,3 +1,5 @@
+import functools
+
 class MemoryManager:
     def __init__(self, backends=None, **kwargs):
         """
@@ -90,8 +92,9 @@ class SharedMemoryManager:
 
     def _thread_safe(method):
         """Decorator to add thread-safety to methods if enabled."""
+        @functools.wraps(method)
         def wrapper(self, *args, **kwargs):
-            if self.lock:
+            if hasattr(self, 'lock') and self.lock:  # Ensure instance has a lock attribute
                 with self.lock:
                     return method(self, *args, **kwargs)
             return method(self, *args, **kwargs)
