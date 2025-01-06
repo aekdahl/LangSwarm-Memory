@@ -155,7 +155,7 @@ def main(python_version):
     }
 
     update_requirements_with_python_versions(
-        latest_versions["core"], python_version, True, extras_require
+        latest_versions, python_version, True, extras_require
     )
 
 if __name__ == "__main__":
