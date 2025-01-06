@@ -131,10 +131,37 @@ class SharedMemoryManager:
             backend.add_documents(documents)
 
     @_thread_safe
-    def query(self, query, top_k=5):
+    def query(self, query_params, deduplicate=True, sort_key=None, sort_reverse=False):
+        """
+        Query shared memory segments for matching results.
+
+        Args:
+            query_params (dict): Parameters to filter the query.
+            deduplicate (bool): Whether to deduplicate results. Default is True.
+            sort_key (str): Key to sort results by (e.g., 'timestamp').
+            sort_reverse (bool): Whether to reverse the sorting order. Default is False.
+
+        Returns:
+            list: A list of query results.
+        """
         results = []
-        for backend in self.backends:
-            results.extend(backend.query(query, top_k))
+        
+        # Aggregate results from all shared memory segments
+        for segment in self._segments:
+            results.extend(segment.query(query_params))
+
+        # Deduplicate results if required
+        if deduplicate:
+            # Assuming each result is hashable (e.g., dictionaries with immutable keys/values)
+            results = list({frozenset(item.items()): item for item in results}.values())
+
+        # Sort results if a sort key is provided
+        if sort_key:
+            try:
+                results.sort(key=lambda x: x.get(sort_key), reverse=sort_reverse)
+            except KeyError:
+                raise ValueError(f"Sort key '{sort_key}' not found in results.")
+
         return results
 
     @_thread_safe
