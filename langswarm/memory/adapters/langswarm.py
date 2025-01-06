@@ -1,21 +1,38 @@
+from typing import Dict  # For typing annotations
 from langswarm.memory.adapters.database_adapter import DatabaseAdapter
 
 try:
     import sqlite3
 except ImportError:
     sqlite3 = None
-    
-import sqlite3
-import redis
-from chromadb import Client
-from chromadb.config import Settings
-from google.cloud import storage
 
-from elasticsearch import Elasticsearch
-from typing import Dict  # For typing annotations
+try:
+    import redis
+except ImportError:
+    redis = None
+
+try:
+    from chromadb import Client as ChromaDB
+    from chromadb.config import Settings
+except ImportError:
+    ChromaDB = None
+
+try:
+    from google.cloud import storage
+except ImportError:
+    storage = None
+
+try:
+    from elasticsearch import Elasticsearch
+except ImportError:
+    storage = None
+
 
 class SQLiteAdapter(DatabaseAdapter):
     def __init__(self, db_path="memory.db"):
+        if any(var is None for var in (sqlite3)):
+            raise ValueError("Unsupported database. Make sure sqlite3 is installed.")
+            
         self.db_path = db_path
         self._initialize_db()
 
@@ -83,6 +100,9 @@ class SQLiteAdapter(DatabaseAdapter):
 
 class RedisAdapter(DatabaseAdapter):
     def __init__(self, redis_url="redis://localhost:6379/0"):
+        if any(var is None for var in (redis)):
+            raise ValueError("Unsupported database. Make sure sqlite3 is installed.")
+            
         self.client = redis.StrictRedis.from_url(redis_url)
 
     def add_documents(self, documents):
@@ -119,7 +139,10 @@ class RedisAdapter(DatabaseAdapter):
 
 class ChromaDBAdapter(DatabaseAdapter):
     def __init__(self, collection_name="shared_memory", persist_directory=None):
-        self.client = Client(Settings(persist_directory=persist_directory))
+        if any(var is None for var in (ChromaDB)):
+            raise ValueError("Unsupported database. Make sure ChromaDB is installed.")
+            
+        self.client = ChromaDB(Settings(persist_directory=persist_directory))
         self.collection = self.client.get_or_create_collection(name=collection_name)
 
     def add_documents(self, documents):
@@ -159,6 +182,9 @@ class ChromaDBAdapter(DatabaseAdapter):
 
 class GCSAdapter(DatabaseAdapter):
     def __init__(self, bucket_name, prefix="shared_memory/"):
+        if any(var is None for var in (storage)):
+            raise ValueError("Unsupported database. Make sure google cloud storage is installed.")
+            
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
         self.prefix = prefix
