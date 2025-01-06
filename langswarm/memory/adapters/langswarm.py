@@ -257,3 +257,6 @@ class ElasticsearchAdapter(DatabaseAdapter):
     def delete_by_metadata(self, metadata_query):
         body = {"query": {"bool": {"filter": [{"term": metadata_query}]}}}
         self.db.delete_by_query(index="documents", body=body)
+
+    def capabilities(self) -> Dict[str, bool]:
+        return {"vector_search": False, "metadata_filtering": True}
