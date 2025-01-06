@@ -90,9 +90,6 @@ def update_requirements_with_python_versions(dependency_versions, python_version
     """
     # Get existing supported versions
     supported_versions = set(get_supported_python_versions())
-
-    print("supported_versions", supported_versions)
-    print("python_version success", success)
     
     if success:
         supported_versions.add(python_version)  # Add the Python version if it succeeded
@@ -101,8 +98,6 @@ def update_requirements_with_python_versions(dependency_versions, python_version
 
     # Sort for consistency
     supported_versions = sorted(supported_versions)
-
-    print("supported_versions post sorting", supported_versions)
 
     with open("requirements.txt", "w") as f:
         # Add the comment about supported Python versions
