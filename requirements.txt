@@ -1,42 +1,21 @@
-# Core dependencies
-numpy>=1.24.3
-torch>=2.0.1
+# Supported versions of Python: 3.8
+# Automatically updated by dependency_update_test.py
 
-# Optional dependencies
-[langchain]
-langchain>=0.0.180
+# Core dependenciesnumpy>=1.24.4
+torch>=2.4.1
 
-[llamaindex]
-llama-index>=0.5.6
 
-[pinecone]
-pinecone-client>=2.2.1
-
-[weaviate]
-weaviate-client>=3.2.0
-
-[milvus]
-milvus>=2.2.12
-
-[qdrant]
-qdrant-client>=0.10.0
-
-[sqlite]
-sqlalchemy>=1.4.46
-
-[metadata]
-sentence-transformers>=2.2.2
+# Optional dependencieslangchain>=0.2.17
+llama-index>=0.11.23
+pinecone-client>=5.0.1
+weaviate-client>=4.8.1
+milvus>=2.3.5
+qdrant-client>=1.12.1
+sqlalchemy>=2.0.36
+sentence-transformers>=3.2.1
 rank-bm25>=0.2.2
-
-[redis]
-redis>=4.5.4
+redis>=5.3.0b4
 aioredis>=2.0.1
-
-[gcs]
-google-cloud-storage>=2.4.0
-
-[openai]
-openai>=0.27.0
-
-[huggingface]
-transformers>=4.30.2
+google-cloud-storage>=3.0.0rc1
+openai>=1.59.3
+transformers>=4.46.3
