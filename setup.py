@@ -6,11 +6,11 @@ with open("requirements.txt", "r") as f:
     sections = f.read().split("# Optional dependencies")  # Split the content into sections
 
 # Process core dependencies
-requirements["core"] = [line for line in sections[0].strip().splitlines() if "==" in line]
+requirements["core"] = [line for line in sections[0].strip().splitlines() if ">=" in line.replace("==",">=")]
 
 # Process optional dependencies
 if len(sections) > 1:
-    requirements["optional"] = {line.split("==")[0]:line for line in sections[1].strip().splitlines() if "==" in line}
+    requirements["optional"] = {line.strip().replace("==",">=").split(">=")[0]:line for line in sections[1].strip().splitlines() if ">=" in line.replace("==",">=")}
     requirements["optional"]["all"] = list(set(dep for deps in requirements["optional"].values() for dep in deps))
 
 setup(
