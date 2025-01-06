@@ -45,42 +45,15 @@ class PineconeAdapter(DatabaseAdapter):
         metadata = [doc.get("metadata", {}) for doc in documents]
         self.db.add_texts(texts, metadatas=metadata)
 
-    def query(self, query, filters=None):
-        return self.db.similarity_search(query, filter=filters)
-
-    def delete(self, document_ids):
-        for doc_id in document_ids:
-            self.db.delete(doc_id)
-
-    def capabilities(self) -> Dict[str, bool]:
-        return {
-            "vector_search": True,  # Pinecone supports vector-based similarity search.
-            "metadata_filtering": True,  # Metadata filtering is available.
-            "semantic_search": True,  # Embedding-based semantic search supported via OpenAIEmbeddings.
-        }
-
-class PineconeAdapter(DatabaseAdapter):
-    def __init__(self, *args, **kwargs):
-        if all(var is not None for var in (Pinecone, OpenAIEmbeddings)):
-            pinecone.init(api_key=kwargs["api_key"], environment=kwargs["environment"])
-            self.db = Pinecone(index_name=kwargs["index_name"], embedding_function=OpenAIEmbeddings())
-        else:
-            raise ValueError("Unsupported vector database. Make sure LangChain and Pinecone packages are installed.")
-
-    def add_documents(self, documents):
-        texts = [doc["text"] for doc in documents]
-        metadata = [doc.get("metadata", {}) for doc in documents]
-        self.db.add_texts(texts, metadatas=metadata)
-
     def add_documents_with_metadata(self, documents, metadata):
         self.db.add_texts(documents, metadatas=metadata)
-
+        
     def query(self, query, filters=None):
         return self.db.similarity_search(query, filter=filters)
 
     def query_by_metadata(self, metadata_query, top_k=5):
         return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
-
+        
     def delete(self, document_ids):
         for doc_id in document_ids:
             self.db.delete(doc_id)
@@ -90,9 +63,13 @@ class PineconeAdapter(DatabaseAdapter):
         ids_to_delete = [doc["id"] for doc in results]
         for doc_id in ids_to_delete:
             self.db.delete(doc_id)
-
-
-
+            
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,  # Pinecone supports vector-based similarity search.
+            "metadata_filtering": True,  # Metadata filtering is available.
+            "semantic_search": True,  # Embedding-based semantic search supported via OpenAIEmbeddings.
+        }
 
 
 class WeaviateAdapter(DatabaseAdapter):
@@ -117,12 +94,27 @@ class WeaviateAdapter(DatabaseAdapter):
         metadata = [doc.get("metadata", {}) for doc in documents]
         self.db.add_texts(texts, metadatas=metadata)
 
+    def add_documents_with_metadata(self, documents, metadata):
+        for doc, meta in zip(documents, metadata):
+            self.db.add_text(doc, metadata=meta)
+
     def query(self, query, filters=None):
         return self.db.similarity_search(query, filter=filters)
+        # return self.db.query(query, filters=filters) <-- Should we use the simple query instead?        
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        return self.db.query_by_metadata(metadata_query, top_k=top_k)
 
     def delete(self, document_ids):
-        # Not directly supported in LangChain's Weaviate implementation
-        raise NotImplementedError("Document deletion is not yet supported in WeaviateAdapter.")
+        try:
+            for doc_id in document_ids:
+                self.db.delete_by_id(doc_id)
+        except:
+            # Not directly supported in LangChain's Weaviate implementation
+            raise NotImplementedError("Document deletion is not yet supported in WeaviateAdapter.")
+
+    def delete_by_metadata(self, metadata_query):
+        self.db.delete_by_metadata(metadata_query)
 
     def capabilities(self) -> Dict[str, bool]:
         return {
@@ -130,38 +122,6 @@ class WeaviateAdapter(DatabaseAdapter):
             "metadata_filtering": True,  # Metadata filtering is available.
             "semantic_search": True,  # Semantic search is supported with embeddings.
         }
-
-class WeaviateAdapter(DatabaseAdapter):
-    def __init__(self, *args, **kwargs):
-        if Weaviate:
-            self.db = Weaviate(client=kwargs["client"])
-        else:
-            raise ValueError("Weaviate package is not installed.")
-
-    def add_documents(self, documents):
-        for doc in documents:
-            self.db.add_text(doc["text"], metadata=doc.get("metadata", {}))
-
-    def add_documents_with_metadata(self, documents, metadata):
-        for doc, meta in zip(documents, metadata):
-            self.db.add_text(doc, metadata=meta)
-
-    def query(self, query, filters=None):
-        return self.db.query(query, filters=filters)
-
-    def query_by_metadata(self, metadata_query, top_k=5):
-        return self.db.query_by_metadata(metadata_query, top_k=top_k)
-
-    def delete(self, document_ids):
-        for doc_id in document_ids:
-            self.db.delete_by_id(doc_id)
-
-    def delete_by_metadata(self, metadata_query):
-        self.db.delete_by_metadata(metadata_query)
-
-
-
-
 
 
 class MilvusAdapter(DatabaseAdapter):
@@ -183,32 +143,6 @@ class MilvusAdapter(DatabaseAdapter):
         metadata = [doc.get("metadata", {}) for doc in documents]
         self.db.add_texts(texts, metadatas=metadata)
 
-    def query(self, query, filters=None):
-        return self.db.similarity_search(query, filter=filters)
-
-    def delete(self, document_ids):
-        # Not directly supported in LangChain's Milvus implementation
-        raise NotImplementedError("Document deletion is not yet supported in MilvusAdapter.")
-
-    def capabilities(self) -> Dict[str, bool]:
-        return {
-            "vector_search": True,  # Milvus supports vector-based similarity search.
-            "metadata_filtering": True,  # Metadata filtering is available.
-            "semantic_search": True,  # Semantic search is supported with embeddings.
-        }
-
-class MilvusAdapter(DatabaseAdapter):
-    def __init__(self, *args, **kwargs):
-        if Milvus:
-            self.db = Milvus(collection_name=kwargs["collection_name"])
-        else:
-            raise ValueError("Milvus package is not installed.")
-
-    def add_documents(self, documents):
-        texts = [doc["text"] for doc in documents]
-        metadata = [doc.get("metadata", {}) for doc in documents]
-        self.db.add_texts(texts, metadatas=metadata)
-
     def add_documents_with_metadata(self, documents, metadata):
         self.db.add_texts(documents, metadatas=metadata)
 
@@ -219,14 +153,22 @@ class MilvusAdapter(DatabaseAdapter):
         return self.db.query_by_metadata(metadata_query, top_k=top_k)
 
     def delete(self, document_ids):
-        for doc_id in document_ids:
-            self.db.delete_by_id(doc_id)
+        try:
+            for doc_id in document_ids:
+                self.db.delete_by_id(doc_id)
+        except:
+            # Not directly supported in LangChain's Milvus implementation
+            raise NotImplementedError("Document deletion is not yet supported in MilvusAdapter.")
 
     def delete_by_metadata(self, metadata_query):
         self.db.delete_by_metadata(metadata_query)
 
-
-
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,  # Milvus supports vector-based similarity search.
+            "metadata_filtering": True,  # Metadata filtering is available.
+            "semantic_search": True,  # Semantic search is supported with embeddings.
+        }
 
 
 class QdrantAdapter(DatabaseAdapter):
@@ -258,6 +200,7 @@ class QdrantAdapter(DatabaseAdapter):
             "metadata_filtering": True,  # Metadata filtering is available.
             "semantic_search": True,  # Embedding-based semantic search supported.
         }
+
 
 class SQLiteAdapter(DatabaseAdapter):
     def __init__(self, *args, **kwargs):
