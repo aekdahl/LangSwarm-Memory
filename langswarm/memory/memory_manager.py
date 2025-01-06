@@ -24,11 +24,36 @@ class MemoryManager:
         for adapter in self.adapters:
             adapter.add_documents(documents)
 
-    def query(self, query, filters=None):
+    def query(self, query, filters=None, sort_key=None, top_k=None):
+        """
+        Query all backends and aggregate results with deduplication and sorting.
+    
+        Args:
+            query (str): Query string.
+            filters (dict): Optional filters for querying.
+            sort_key (str): Optional key for sorting results.
+            top_k (int): Optional number of top results to return.
+    
+        Returns:
+            list: Deduplicated and sorted query results.
+        """
         results = []
         for adapter in self.adapters:
             results.extend(adapter.query(query, filters))
-        return results
+    
+        # Deduplicate results by text (or other unique key)
+        unique_results = {res["text"]: res for res in results}.values()
+    
+        # Sort results if a sort key is provided
+        if sort_key:
+            unique_results = sorted(unique_results, key=lambda x: x.get(sort_key), reverse=True)
+    
+        # Limit to top_k results if specified
+        if top_k:
+            unique_results = list(unique_results)[:top_k]
+    
+        return list(unique_results)
+
 
     def delete(self, document_ids):
         for adapter in self.adapters:
