@@ -30,6 +30,13 @@ class LoadFromDiskAdapter(DatabaseAdapter):
     def delete(self, document_ids):
         raise NotImplementedError("Delete functionality not implemented for LlamaIndex")
 
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,
+            "metadata_filtering": True,
+            "semantic_search": True,
+        }
+
 try:
     import pinecone
     from llama_index import PineconeIndex, Document
