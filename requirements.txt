@@ -1,4 +1,4 @@
-# Supported versions of Python: 3.8
+# Supported versions of Python: 3.8, 3.9
 # Automatically updated by dependency_update_test.py
 
 # Core dependencies
