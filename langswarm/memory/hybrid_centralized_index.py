@@ -151,11 +151,87 @@ class HybridCentralizedIndex:
         elif backend == "pinecone":
             self.backends[backend].upsert(data, **kwargs)
 
-    def query(self, query, backend="faiss", **kwargs):
+    def query(self, query_text, backend=None, filters=None, top_k=5):
         """
-        Query the specified backend.
-        
+        Query the specified backend or all enabled backends.
+
         Args:
-            query (str): Query string or vector.
-            backend (str): Backend to use (default: 'faiss').
-            **kwargs: Additional arguments for bac
+            query_text (str): Query string or vector.
+            backend (str): Specific backend to query. If None, queries all enabled backends.
+            filters (dict): Optional filters for querying.
+            top_k (int): Number of top results to retrieve.
+
+        Returns:
+            list: Combined and deduplicated results from the backends.
+        """
+        results = []
+
+        if backend:
+            # Query a specific backend
+            if backend not in self.backends:
+                raise ValueError(f"Backend '{backend}' is not initialized or supported.")
+            results.extend(self._query_backend(backend, query_text, filters, top_k))
+        else:
+            # Query all enabled backends
+            for backend_name, backend_instance in self.backends.items():
+                results.extend(self._query_backend(backend_name, query_text, filters, top_k))
+
+        # Deduplicate and sort results if necessary
+        results = self._deduplicate_and_sort_results(results, top_k)
+        return results
+
+    def _query_backend(self, backend, query_text, filters, top_k):
+        """
+        Query a specific backend with the provided parameters.
+
+        Args:
+            backend (str): Backend name.
+            query_text (str): Query string or vector.
+            filters (dict): Optional filters for querying.
+            top_k (int): Number of top results to retrieve.
+
+        Returns:
+            list: Query results from the backend.
+        """
+        backend_instance = self.backends.get(backend)
+
+        if backend == "faiss":
+            # FAISS query logic
+            return backend_instance.search(query_text, top_k)
+        elif backend == "elasticsearch":
+            # Elasticsearch query logic
+            body = {"query": {"match": {"text": query_text}}}
+            if filters:
+                body["query"] = {"bool": {"must": [{"match": {"text": query_text}}], "filter": [{"term": filters}]}}
+            return backend_instance.search(index=self.config["elasticsearch"]["index_name"], body=body)["hits"]["hits"]
+        elif backend == "pinecone":
+            # Pinecone query logic
+            return backend_instance.query(vector=query_text, top_k=top_k, filter=filters)
+        else:
+            raise ValueError(f"Unsupported backend '{backend}' for querying.")
+
+    def _deduplicate_and_sort_results(self, results, top_k):
+        """
+        Deduplicate and sort query results.
+
+        Args:
+            results (list): Raw query results.
+            top_k (int): Number of top results to retain.
+
+        Returns:
+            list: Deduplicated and sorted results.
+        """
+        # Deduplicate results based on a unique identifier (e.g., "id" or "text")
+        seen = set()
+        deduplicated_results = []
+        for result in results:
+            identifier = result.get("id") or result.get("text")
+            if identifier not in seen:
+                seen.add(identifier)
+                deduplicated_results.append(result)
+
+        # Sort results by score or other criteria
+        sorted_results = sorted(deduplicated_results, key=lambda x: x.get("score", 0), reverse=True)
+
+        # Return the top_k results
+        return sorted_results[:top_k]
