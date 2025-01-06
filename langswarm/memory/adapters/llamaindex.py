@@ -8,10 +8,13 @@ except ImportError:
 
 class LoadFromDiskAdapter(DatabaseAdapter):
     def __init__(self, index_path="index.json"):
-        try:
-            self.index = GPTSimpleVectorIndex.load_from_disk(index_path)
-        except FileNotFoundError:
-            self.index = GPTSimpleVectorIndex([])
+        if all(var is not None for var in (GPTSimpleVectorIndex, Document)):
+            try:
+                self.index = GPTSimpleVectorIndex.load_from_disk(index_path)
+            except FileNotFoundError:
+                self.index = GPTSimpleVectorIndex([])
+        else:
+            xxx
 
     def add_documents(self, documents):
         docs = [Document(text=doc["text"], metadata=doc.get("metadata", {})) for doc in documents]
