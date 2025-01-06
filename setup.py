@@ -1,9 +1,18 @@
 from setuptools import setup, find_packages, find_namespace_packages
 
+requirements = {"core": [], "optional": {}}
 # Read dependencies from requirements.txt
 with open("requirements.txt", "r") as f:
-    requirements = f.read().splitlines()
-    
+    sections = f.read().split("# Optional dependencies")  # Split the content into sections
+
+# Process core dependencies
+requirements["core"] = [line for line in sections[0].strip().splitlines() if "==" in line]
+
+# Process optional dependencies
+if len(sections) > 1:
+    requirements["optional"] = {line.split("==")[0]:line for line in sections[1].strip().splitlines() if "==" in line}
+    requirements["optional"]["all"] = list(set(dep for deps in requirements["optional"].values() for dep in deps))
+
 setup(
     name="langswarm-memory",
     version="0.0.1",
@@ -29,10 +38,8 @@ setup(
     ],
     packages=find_namespace_packages(include=["langswarm.*"]),
     python_requires=">=3.8",
-    install_requires=requirements,
-    extras_require={
-        "dev": ["pytest", "black", "flake8"],
-    },
+    install_requires=requirements["core"],
+    extras_require=requirements["optional"],
     include_package_data=True,
     entry_points={
         "console_scripts": [
