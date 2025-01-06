@@ -1,179 +1,65 @@
-# Hybrid Shared Memory System with Scoped Access
 
-[![PyPI version](https://badge.fury.io/py/memswarm.svg)](https://badge.fury.io/py/memswarm)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-<!-- [![Tests](https://github.com/aekdahl/memswarm/workflows/tests/badge.svg)](https://github.com/aekdahl/memswarm/actions)-->
+# LangSwarm-Memory
 
-
-## Overview
-This project provides a hybrid shared memory system combining multiple storage backends (e.g., in-memory, SQLite, Redis, ChromaDB, GCS) with dynamic scoping capabilities. It supports fine-grained access for individual agents and groups, enabling efficient and context-aware memory sharing in multi-agent systems.
-
----
+LangSwarm-Memory is a modular and extensible memory management framework designed to support multi-agent systems in diverse AI-driven applications. It provides powerful tools for retrieval, reranking, and workflow orchestration, making it ideal for autonomous AI solutions.
 
 ## Features
 
-### Core Features
-- **Hybrid Memory**: Combines fast in-memory caching with persistent backends for durability.
-- **Dynamic Scoping**:
-  - Scoped reads and writes based on `agent_id`, `group_id`, and `context_id`.
-  - Granular control over memory visibility and organization.
-- **Multi-Backend Support**:
-  - **In-Memory**: Lightweight and fast.
-  - **SQLite**: Persistent, lightweight database.
-  - **Redis**: High-performance, distributed memory.
-  - **ChromaDB**: Vector-based memory with advanced metadata filtering.
-  - **Google Cloud Storage (GCS)**: Persistent cloud storage.
-- **Thread and Async Safety**: Ensures consistent operations in concurrent environments.
-
----
+- **Retrieval Workflows**: Hybrid, temporal, federated, cross-domain, and more.
+- **Advanced Reranking**: Multi-agent and combined reranking workflows for improved relevance.
+- **Domain-Specific Templates**: Pre-built workflows for biomedical research, customer support, legal documents, and more.
+- **Pluggable Adapters**: Integrations with LangChain, LlamaIndex, and various databases (e.g., Pinecone, Redis, SQLite, etc.).
 
 ## Installation
 
-### Prerequisites
-- Python 3.8+
-- Install required packages:
+To install LangSwarm-Memory, use pip:
 
 ```bash
-pip install -r requirements.txt
+pip install langswar-memory
 ```
-
-### Requirements
-- For ChromaDB: Install `chromadb`
-- For Redis: Install `redis-py`
-- For GCS: Install `google-cloud-storage`
-
----
 
 ## Usage
 
-### Initialization
-
-#### In-Memory Backend
-```python
-from memory_backends.in_memory import InMemorySharedMemory
-
-memory = InMemorySharedMemory()
-```
-
-#### SQLite Backend
-```python
-from memory_backends.sqlite_memory import SQLiteSharedMemory
-
-memory = SQLiteSharedMemory(db_path="shared_memory.db")
-```
-
-#### Hybrid Memory
-```python
-from memory_backends.hybrid_memory import HybridMemory
-from memory_backends.in_memory import InMemorySharedMemory
-from memory_backends.sqlite_memory import SQLiteSharedMemory
-
-in_memory = InMemorySharedMemory()
-persistent = SQLiteSharedMemory(db_path="shared_memory.db")
-
-hybrid_memory = HybridMemory(in_memory, persistent)
-```
-
----
-
-### Write Scoped Entries
+### Example: Hybrid Retrieval and Reranking Workflow
 
 ```python
-hybrid_memory.write_scope(
-    value="The capital of France is Paris.",
-    metadata={"agent_id": "Agent1", "group_id": "GroupA"},
-    context_id="ctx_1234"
-)
+from langswar_memory.templates.hybrid import HybridRetrievalRerankingWorkflow
 
-hybrid_memory.write_scope(
-    value="France is in Europe.",
-    metadata={"agent_id": "Agent2", "group_id": "GroupA"},
-    context_id="ctx_1234"
-)
+# Configuration
+dense_config = {"backend": "pinecone", "api_key": "your-api-key"}
+sparse_config = {"backend": "bm25"}
+reranker_configs = [{"reranker": "SemanticReranker", "params": {"model_name": "all-MiniLM-L6-v2"}}]
+documents = [
+    {"text": "What is LangSwarm?", "metadata": {"source": "docs"}},
+    {"text": "LangSwarm is a multi-agent framework.", "metadata": {"source": "tutorials"}}
+]
+
+# Initialize and run the workflow
+workflow = HybridRetrievalRerankingWorkflow(dense_config, sparse_config, reranker_configs, documents)
+response = workflow.run("What is LangSwarm?")
+print(response)
 ```
 
----
+## Components
 
-### Read Scoped Entries
+### Templates
+- **`hybrid.py`**: Combines dense and sparse retrieval with reranking.
+- **`biomed.py`**: Biomedical literature retrieval and ranking.
+- **`legal.py`**: Legal document retrieval for case preparation.
+- **`chatbot.py`**: Knowledge-based chatbot workflows.
+- **... and more**
 
-#### Read Entries for a Specific Agent
-```python
-agent_data = hybrid_memory.read_scope(agent_id="Agent1")
-print(agent_data)
-```
+### Rerankers
+- Multi-agent and combined reranking strategies for improved document scoring.
 
-#### Read Entries for a Specific Group
-```python
-group_data = hybrid_memory.read_scope(group_id="GroupA")
-print(group_data)
-```
-
-#### Read Entries for a Specific Context
-```python
-context_data = hybrid_memory.read_scope(context_id="ctx_1234")
-print(context_data)
-```
-
-#### Combine Scopes
-```python
-agent_context_data = hybrid_memory.read_scope(agent_id="Agent1", context_id="ctx_1234")
-print(agent_context_data)
-```
-
----
-
-## Backend-Specific Features
-
-### In-Memory Shared Memory
-- Lightweight and fast.
-- Ideal for temporary or volatile data storage.
-
-### SQLite Shared Memory
-- Persistent storage for durable data.
-- Useful for small to medium datasets.
-
-### Redis Shared Memory
-- High-performance distributed memory.
-- Suitable for large-scale, real-time applications.
-
-### ChromaDB Shared Memory
-- Vector-based memory for similarity search.
-- Advanced metadata filtering.
-
-### Google Cloud Storage (GCS) Shared Memory
-- Persistent cloud-based storage.
-- Ideal for distributed systems with shared resources.
-
----
-
-## **Next Steps**
-
-1. **Enhance Pub/Sub Capabilities**:
-   - Enable real-time notifications for memory updates.
-
-2. **Expand Backend Support**:
-   - Add new backends.
-
-3. **Observability**:
-   - Integrate logging and metrics for better debugging and monitoring.
-
-MemSwarm is poised to be the go-to solution for shared memory in multi-agent systems. Let us know your feedback and feature requests to shape its future!
-
----
-
-## Future Enhancements
-- **Access Control**: Add `readable_by` and `writable_by` metadata for granular permission management.
-- **Dynamic Group Management**: Support for adding/removing agents from groups at runtime.
-- **Performance Optimization**: Benchmark and improve query performance for large-scale datasets.
-
----
+### Adapters
+- Database integrations (e.g., Pinecone, SQLite, Redis, etc.).
+- LangChain and LlamaIndex connectors.
 
 ## Contributing
-1. Fork the repository.
-2. Create a new branch for your feature.
-3. Submit a pull request with a detailed explanation.
 
----
+Contributions are welcome! Please open an issue or pull request on [GitHub](https://github.com/your-repo/langswarm-memory).
 
 ## License
-This project is licensed under the MIT License.
+
+LangSwarm-Memory is licensed under the [MIT License](LICENSE).
