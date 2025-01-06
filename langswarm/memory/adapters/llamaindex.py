@@ -71,6 +71,9 @@ class LlamaIndexPineconeAdapter(LlamaIndexAdapter):
     def delete(self, document_ids):
         self.index.delete(document_ids)
 
+    def capabilities(self) -> Dict[str, bool]:
+        return {"vector_search": True, "metadata_filtering": True}
+
 
 try:
     from llama_index import WeaviateIndex, Document
@@ -173,6 +176,9 @@ class LlamaIndexFAISSAdapter(LlamaIndexAdapter):
 
     def delete(self, document_ids):
         raise NotImplementedError("Document deletion is not yet supported for FAISS.")
+
+    def capabilities(self) -> Dict[str, bool]:
+        return {"vector_search": True, "metadata_filtering": False}
 
 class FAISSAdapter(DatabaseAdapter):
     def __init__(self, *args, **kwargs):
