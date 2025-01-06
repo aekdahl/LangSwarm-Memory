@@ -14,7 +14,7 @@ class LoadFromDiskAdapter(DatabaseAdapter):
             except FileNotFoundError:
                 self.index = GPTSimpleVectorIndex([])
         else:
-            xxx
+            raise ValueError("Unsupported database. Make sure LlamaIndex is installed.")
 
     def add_documents(self, documents):
         docs = [Document(text=doc["text"], metadata=doc.get("metadata", {})) for doc in documents]
