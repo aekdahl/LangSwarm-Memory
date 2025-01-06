@@ -52,6 +52,79 @@ class PineconeAdapter(DatabaseAdapter):
         for doc_id in document_ids:
             self.db.delete(doc_id)
 
+class PineconeAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if all(var is not None for var in (Pinecone, OpenAIEmbeddings)):
+            pinecone.init(api_key=kwargs["api_key"], environment=kwargs["environment"])
+            self.db = Pinecone(index_name=kwargs["index_name"], embedding_function=OpenAIEmbeddings())
+        else:
+            raise ValueError("Unsupported vector database. Make sure LangChain and Pinecone packages are installed.")
+
+    def add_documents(self, documents):
+        """
+        Add documents with optional metadata.
+
+        Args:
+            documents (list): List of dictionaries with 'text' and optional 'metadata'.
+        """
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def add_documents_with_metadata(self, documents, metadata):
+        """
+        Adds documents explicitly with metadata.
+
+        Args:
+            documents (list): List of texts.
+            metadata (list): List of metadata dicts corresponding to each document.
+        """
+        self.db.add_texts(documents, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        """
+        Query documents with optional metadata filters.
+
+        Args:
+            query (str): The query text.
+            filters (dict): Metadata filters for the query.
+        """
+        return self.db.similarity_search(query, filter=filters)
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        """
+        Query documents by metadata.
+
+        Args:
+            metadata_query (dict): Metadata filter parameters.
+            top_k (int): Number of results to retrieve.
+        """
+        return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
+
+    def delete(self, document_ids):
+        """
+        Delete documents by their IDs.
+
+        Args:
+            document_ids (list): List of document IDs to delete.
+        """
+        for doc_id in document_ids:
+            self.db.delete(doc_id)
+
+    def delete_by_metadata(self, metadata_query):
+        """
+        Delete documents based on metadata.
+
+        Args:
+            metadata_query (dict): Metadata filter parameters.
+        """
+        results = self.db.similarity_search(query=None, filter=metadata_query, k=1000)
+        ids_to_delete = [doc["id"] for doc in results]
+        for doc_id in ids_to_delete:
+            self.db.delete(doc_id)
+
+
+
 
 class WeaviateAdapter(DatabaseAdapter):
     """
