@@ -94,11 +94,11 @@ def update_requirements_with_python_versions(dependency_versions, python_version
         # Write the compatible dependency versions
         f.write("\n\n# Core dependencies")
         for package, compatible_version in dependency_versions["core"].items():
-            f.write(f"{package}=={compatible_version}\n")
+            f.write(f"{package}>={compatible_version}\n")
 
         f.write("\n\n# Optional dependencies")
         for package, compatible_version in dependency_versions["optional"].items():
-            f.write(f"{package}=={compatible_version}\n")
+            f.write(f"{package}>={compatible_version}\n")
     print("requirements.txt updated successfully with Python version support comment.")
 
 def assign_versions(dependencies, success):
@@ -130,10 +130,11 @@ def main(python_version):
             sections = f.read().split("# Optional dependencies")  # Split the content into sections
 
         # Process core dependencies
-        dependencies["core"] = [line.strip().split("==")[0] for line in sections[0].strip().splitlines() if "==" in line]
+        dependencies["core"] = [line.strip().replace("==",">=").split(">=")[0] for line in sections[0].strip().splitlines() if ">=" in line.replace("==",">=")]
         
         # Process optional dependencies
-        dependencies["optional"] = [line.strip().split("==")[0] for line in sections[1].strip().splitlines() if "==" in line]
+        if len(sections) > 1:
+            dependencies["optional"] = [line.strip().replace("==",">=").split(">=")[0] for line in sections[1].strip().splitlines() if ">=" in line.replace("==",">=")]
         
     except FileNotFoundError:
         print("requirements.txt not found.")
