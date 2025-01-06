@@ -7,11 +7,10 @@ try:
 except ImportError:
     Pinecone = None
     OpenAIEmbeddings = None
-    pinecone = None
 
 class PineconeAdapter(DatabaseAdapter):
     def __init__(self, *args, **kwargs):
-        if all(var is not None for var in (Pinecone, OpenAIEmbeddings, pinecone)):
+        if all(var is not None for var in (Pinecone, OpenAIEmbeddings)):
             pinecone.init(api_key=kwargs["api_key"], environment=kwargs["environment"])
             self.db = Pinecone(index_name=kwargs["index_name"], embedding_function=OpenAIEmbeddings())
         else:
