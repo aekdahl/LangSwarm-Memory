@@ -79,7 +79,11 @@ class LlamaIndexPineconeAdapter(LlamaIndexAdapter):
         self.index.delete(document_ids)
 
     def capabilities(self) -> Dict[str, bool]:
-        return {"vector_search": True, "metadata_filtering": True}
+        return {
+            "vector_search": True,
+            "metadata_filtering": True,
+            "semantic_search": True,
+        }
 
 
 try:
@@ -114,6 +118,13 @@ class LlamaIndexWeaviateAdapter(LlamaIndexAdapter):
 
     def delete(self, document_ids):
         raise NotImplementedError("Document deletion is not yet supported for Weaviate.")
+
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,
+            "metadata_filtering": True,
+            "semantic_search": True,
+        }
 
 class WeaviateAdapter(DatabaseAdapter):
     def __init__(self, *args, **kwargs):
@@ -185,7 +196,11 @@ class LlamaIndexFAISSAdapter(LlamaIndexAdapter):
         raise NotImplementedError("Document deletion is not yet supported for FAISS.")
 
     def capabilities(self) -> Dict[str, bool]:
-        return {"vector_search": True, "metadata_filtering": False}
+        return {
+            "vector_search": True,
+            "metadata_filtering": False,  # FAISS lacks native metadata filtering.
+            "semantic_search": True,
+        }
 
 class FAISSAdapter(DatabaseAdapter):
     def __init__(self, *args, **kwargs):
@@ -260,3 +275,10 @@ class LlamaIndexSQLAdapter(LlamaIndexAdapter):
 
     def delete(self, document_ids):
         raise NotImplementedError("Document deletion is not yet supported for SQL.")
+
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": False,
+            "metadata_filtering": True,
+            "semantic_search": False,
+        }
