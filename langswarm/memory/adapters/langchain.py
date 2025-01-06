@@ -33,11 +33,13 @@ except ImportError:
 
 try:
     from langchain.vectorstores import Redis
+    import redis
 except ImportError:
     Redis = None
 
 try:
     from langchain.vectorstores import Chroma
+    import chromadb
 except ImportError:
     Chroma = None
 
