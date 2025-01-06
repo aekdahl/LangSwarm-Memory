@@ -94,6 +94,37 @@ class RedisAdapter(DatabaseAdapter):
         for doc_id in document_ids:
             self.client.delete(doc_id)
 
+class RedisAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if Redis:
+            self.db = Redis(index_name=kwargs["index_name"], redis_url=kwargs["redis_url"])
+        else:
+            raise ValueError("Redis package is not installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def add_documents_with_metadata(self, documents, metadata):
+        self.db.add_texts(documents, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        return self.db.similarity_search(query, filter=filters)
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.db.delete(doc_id)
+
+    def delete_by_metadata(self, metadata_query):
+        self.db.delete(filter=metadata_query)
+
+
+
+
 
 class ChromaDBAdapter(DatabaseAdapter):
     def __init__(self, collection_name="shared_memory", persist_directory=None):
