@@ -78,7 +78,7 @@ def prepend_length_comment(output_file, total_length):
 
 if __name__ == "__main__":
     output_filename = "collected_scripts_2.txt"
-    start_folder = memswarm # "langswarm"  # Specify the start folder (e.g., "/" for the root of the repository)
+    start_folder = "memswarm" # "langswarm"  # Specify the start folder (e.g., "/" for the root of the repository)
     include_root = False  # Set this flag to True to include files in the repository root folder
     print(f"Collecting scripts from '{start_folder}' into {output_filename}...")
     collect_scripts(start_folder=start_folder, output_file=output_filename, include_root_files=include_root)
