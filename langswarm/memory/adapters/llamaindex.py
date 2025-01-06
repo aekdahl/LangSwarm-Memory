@@ -1,12 +1,40 @@
 from .database_adapter import DatabaseAdapter
 
 try:
-    from llama_index import GPTSimpleVectorIndex, Document
+    from llama_index import Document
+except ImportError:
+    Document = None
+    
+try:
+    from llama_index import GPTSimpleVectorIndex
 except ImportError:
     GPTSimpleVectorIndex = None
-    Document = None
 
-class LoadFromDiskAdapter(DatabaseAdapter):
+try:
+    import pinecone
+    from llama_index import PineconeIndex
+except ImportError:
+    pinecone = None
+    PineconeIndex = None
+
+try:
+    from llama_index import WeaviateIndex
+except ImportError:
+    WeaviateIndex = None
+
+try:
+    from llama_index import FAISSIndex
+except ImportError:
+    FAISSIndex = None
+
+try:
+    from llama_index import SQLDatabase, SQLIndex
+except ImportError:
+    SQLDatabase = None
+    SQLIndex = None
+
+
+class LlamaIndexDiskAdapter(DatabaseAdapter):
     def __init__(self, index_path="index.json"):
         if all(var is not None for var in (GPTSimpleVectorIndex, Document)):
             try:
@@ -37,13 +65,6 @@ class LoadFromDiskAdapter(DatabaseAdapter):
             "semantic_search": True,
         }
 
-try:
-    import pinecone
-    from llama_index import PineconeIndex, Document
-except ImportError:
-    pinecone = None
-    PineconeIndex = None
-    Document = None
 
 class LlamaIndexPineconeAdapter(LlamaIndexAdapter):
     """
@@ -86,12 +107,6 @@ class LlamaIndexPineconeAdapter(LlamaIndexAdapter):
         }
 
 
-try:
-    from llama_index import WeaviateIndex, Document
-except ImportError:
-    WeaviateIndex = None
-    Document = None
-
 class LlamaIndexWeaviateAdapter(LlamaIndexAdapter):
     """
     Adapter for Weaviate integration with LlamaIndex.
@@ -126,43 +141,6 @@ class LlamaIndexWeaviateAdapter(LlamaIndexAdapter):
             "semantic_search": True,
         }
 
-class WeaviateAdapter(DatabaseAdapter):
-    def __init__(self, *args, **kwargs):
-        if Weaviate:
-            self.db = Weaviate(client=kwargs["client"])
-        else:
-            raise ValueError("Weaviate package is not installed.")
-
-    def add_documents(self, documents):
-        for doc in documents:
-            self.db.add_text(doc["text"], metadata=doc.get("metadata", {}))
-
-    def add_documents_with_metadata(self, documents, metadata):
-        for doc, meta in zip(documents, metadata):
-            self.db.add_text(doc, metadata=meta)
-
-    def query(self, query, filters=None):
-        return self.db.query(query, filters=filters)
-
-    def query_by_metadata(self, metadata_query, top_k=5):
-        return self.db.query_by_metadata(metadata_query, top_k=top_k)
-
-    def delete(self, document_ids):
-        for doc_id in document_ids:
-            self.db.delete_by_id(doc_id)
-
-    def delete_by_metadata(self, metadata_query):
-        self.db.delete_by_metadata(metadata_query)
-
-
-
-
-
-try:
-    from llama_index import FAISSIndex, Document
-except ImportError:
-    FAISSIndex = None
-    Document = None
 
 class LlamaIndexFAISSAdapter(LlamaIndexAdapter):
     """
@@ -202,47 +180,6 @@ class LlamaIndexFAISSAdapter(LlamaIndexAdapter):
             "semantic_search": True,
         }
 
-class FAISSAdapter(DatabaseAdapter):
-    def __init__(self, *args, **kwargs):
-        if FAISS:
-            self.db = FAISS.from_documents([], kwargs["embedding_function"])
-        else:
-            raise ValueError("FAISS package is not installed.")
-
-    def add_documents(self, documents):
-        texts = [doc["text"] for doc in documents]
-        metadata = [doc.get("metadata", {}) for doc in documents]
-        self.db.add_texts(texts, metadatas=metadata)
-
-    def add_documents_with_metadata(self, documents, metadata):
-        self.db.add_texts(documents, metadatas=metadata)
-
-    def query(self, query, filters=None):
-        # FAISS does not natively support metadata filtering; mock functionality
-        results = self.db.similarity_search(query)
-        if filters:
-            return [doc for doc in results if all(doc["metadata"].get(k) == v for k, v in filters.items())]
-        return results
-
-    def query_by_metadata(self, metadata_query, top_k=5):
-        results = self.db.similarity_search(query=None, k=top_k)
-        return [doc for doc in results if all(doc["metadata"].get(k) == v for k, v in metadata_query.items())]
-
-    def delete(self, document_ids):
-        # FAISS does not support deletion by document ID
-        raise NotImplementedError("Deletion by document ID is not supported in FAISS.")
-
-    def delete_by_metadata(self, metadata_query):
-        # Mock functionality for metadata-based deletion
-        raise NotImplementedError("Deletion by metadata is not supported in FAISS.")
-
-
-
-try:
-    from llama_index import SQLDatabase, SQLIndex
-except ImportError:
-    SQLDatabase = None
-    SQLIndex = None
 
 class LlamaIndexSQLAdapter(LlamaIndexAdapter):
     """
