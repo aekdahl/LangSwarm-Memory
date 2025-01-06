@@ -1,3 +1,5 @@
+from memory.rerankers.rerank import BaseReranker  # Import missing base class.
+
 class BM25Reranker(BaseReranker):
     def __init__(self, documents):
         from rank_bm25 import BM25Okapi
