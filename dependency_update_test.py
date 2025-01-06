@@ -41,7 +41,7 @@ def test_dependency_version(package, version):
 
 def find_oldest_compatible_version(package, versions):
     """
-    Find the oldest compatible version of a package using a binary search-like approach.
+    Find the oldest compatible version of a package, biased towards the second half of the list.
     """
     if not versions:
         return None
@@ -50,9 +50,9 @@ def find_oldest_compatible_version(package, versions):
     right = len(versions) - 1
     compatible_version = None
 
-    # Perform binary search until the range is small
+    # Start the binary search with a bias toward the second half
     while right - left > 2:
-        mid = (left + right) // 2
+        mid = left + (right - left) // 3 * 2  # Biased towards the second half
         if test_dependency_version(package, versions[mid]):
             compatible_version = versions[mid]
             right = mid - 1  # Narrow down to the left half
