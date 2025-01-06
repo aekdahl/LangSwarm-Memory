@@ -65,6 +65,13 @@ class SQLiteAdapter(DatabaseAdapter):
                 cursor.execute("DELETE FROM memory WHERE key = ?", (doc_id,))
             conn.commit()
 
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": False,  # SQLite does not support vector-based search.
+            "metadata_filtering": True,  # Supports metadata filtering through SQL queries.
+            "semantic_search": False,  # Requires external embeddings for semantic capabilities.
+        }
+
 
 class RedisAdapter(DatabaseAdapter):
     def __init__(self, redis_url="redis://localhost:6379/0"):
@@ -93,6 +100,13 @@ class RedisAdapter(DatabaseAdapter):
     def delete(self, document_ids):
         for doc_id in document_ids:
             self.client.delete(doc_id)
+
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": False,  # Redis requires vector extensions like RediSearch for this.
+            "metadata_filtering": True,  # Supports metadata-based filtering if implemented.
+            "semantic_search": False,  # No built-in semantic search support.
+        }
 
 class RedisAdapter(DatabaseAdapter):
     def __init__(self, *args, **kwargs):
@@ -157,6 +171,13 @@ class ChromaDBAdapter(DatabaseAdapter):
     def delete(self, document_ids):
         for doc_id in document_ids:
             self.collection.delete(ids=[doc_id])
+
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,  # Chroma supports vector-based search.
+            "metadata_filtering": True,  # Metadata filtering is a core feature.
+            "semantic_search": True,  # Supports embeddings for semantic search.
+        }
 
 class ChromaAdapter(DatabaseAdapter):
     def __init__(self, *args, **kwargs):
@@ -224,6 +245,13 @@ class GCSAdapter(DatabaseAdapter):
             if blob.exists():
                 blob.delete()
 
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": False,  # GCS is a storage solution, not a vector database.
+            "metadata_filtering": True,  # Metadata filtering implemented via stored metadata.
+            "semantic_search": False,  # Semantic capabilities not supported natively.
+        }
+
 
 class ElasticsearchAdapter(DatabaseAdapter):
     def __init__(self, *args, **kwargs):
@@ -259,4 +287,8 @@ class ElasticsearchAdapter(DatabaseAdapter):
         self.db.delete_by_query(index="documents", body=body)
 
     def capabilities(self) -> Dict[str, bool]:
-        return {"vector_search": False, "metadata_filtering": True}
+        return {
+            "vector_search": True,  # Elasticsearch supports vector search with extensions like dense_vector.
+            "metadata_filtering": True,  # Strong metadata filtering capabilities.
+            "semantic_search": True,  # Can be configured for semantic search using embeddings.
+        }
