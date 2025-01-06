@@ -1,28 +1,39 @@
-from setuptools import setup, find_packages
+from setuptools import setup, find_packages, find_namespace_packages
 
+# Read dependencies from requirements.txt
+with open("requirements.txt", "r") as f:
+    requirements = f.read().splitlines()
+    
 setup(
-    name="memswarm",
+    name="langswarm-memory",
     version="0.0.1",
-    description="A hybrid shared memory system with scoped access for multi-agent systems.",
+    description = "",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/aekdahl/memswarm",
+    url="https://github.com/aekdahl/langswarm-memory",
     author="Alexander Ekdahl",
-    author_email="alex@zubi.ai",
+    author_email="alexander.ekdahl@gmail.com",
     license="MIT",
-    packages=find_packages(),
-    install_requires=[
-        "redis",
-        "chromadb",
-        "google-cloud-storage",
-        "sqlalchemy",
-        "sentence-transformers",
-        "scikit-learn"
-    ],
     classifiers=[
-        "Programming Language :: Python :: 3",
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: Developers",
         "License :: OSI Approved :: MIT License",
-        "Operating System :: OS Independent",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
     ],
+    packages=find_namespace_packages(include=["langswarm.*"]),
     python_requires=">=3.8",
+    install_requires=requirements,
+    extras_require={
+        "dev": ["pytest", "black", "flake8"],
+    },
+    include_package_data=True,
+    entry_points={
+        "console_scripts": [
+            # If your package includes CLI tools, specify them here.
+            # e.g., "langswarm=core.cli:main",
+        ],
+    },
 )
