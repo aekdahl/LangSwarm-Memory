@@ -105,6 +105,37 @@ class LlamaIndexWeaviateAdapter(LlamaIndexAdapter):
     def delete(self, document_ids):
         raise NotImplementedError("Document deletion is not yet supported for Weaviate.")
 
+class WeaviateAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if Weaviate:
+            self.db = Weaviate(client=kwargs["client"])
+        else:
+            raise ValueError("Weaviate package is not installed.")
+
+    def add_documents(self, documents):
+        for doc in documents:
+            self.db.add_text(doc["text"], metadata=doc.get("metadata", {}))
+
+    def add_documents_with_metadata(self, documents, metadata):
+        for doc, meta in zip(documents, metadata):
+            self.db.add_text(doc, metadata=meta)
+
+    def query(self, query, filters=None):
+        return self.db.query(query, filters=filters)
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        return self.db.query_by_metadata(metadata_query, top_k=top_k)
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.db.delete_by_id(doc_id)
+
+    def delete_by_metadata(self, metadata_query):
+        self.db.delete_by_metadata(metadata_query)
+
+
+
+
 
 try:
     from llama_index import FAISSIndex, Document
