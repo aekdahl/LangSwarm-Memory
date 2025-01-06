@@ -76,6 +76,9 @@ def update_requirements_with_python_versions(dependency_versions, python_version
     # Get existing supported versions
     supported_versions = set(get_supported_python_versions())
 
+    print("supported_versions", supported_versions)
+    print("python_version success", success)
+    
     if success:
         supported_versions.add(python_version)  # Add the Python version if it succeeded
     else:
@@ -84,7 +87,7 @@ def update_requirements_with_python_versions(dependency_versions, python_version
     # Sort for consistency
     supported_versions = sorted(supported_versions)
 
-    print("dependency_versions", dependency_versions)
+    print("supported_versions post sorting", supported_versions)
 
     with open("requirements.txt", "w") as f:
         # Add the comment about supported Python versions
@@ -92,11 +95,11 @@ def update_requirements_with_python_versions(dependency_versions, python_version
         f.write("# Automatically updated by dependency_update_test.py")
 
         # Write the compatible dependency versions
-        f.write("\n\n# Core dependencies")
+        f.write("\n\n# Core dependencies\n")
         for package, compatible_version in dependency_versions["core"].items():
             f.write(f"{package}>={compatible_version}\n")
 
-        f.write("\n\n# Optional dependencies")
+        f.write("\n\n# Optional dependencies\n")
         for package, compatible_version in dependency_versions["optional"].items():
             f.write(f"{package}>={compatible_version}\n")
     print("requirements.txt updated successfully with Python version support comment.")
@@ -140,13 +143,10 @@ def main(python_version):
         print("requirements.txt not found.")
         sys.exit(1)
 
-    print("Identified dependencies", dependencies)
     success = True  # Track whether all tests passed
     core, success = assign_versions(dependencies["core"], success)
     optional, success = assign_versions(dependencies["optional"], success)
     latest_versions = {"core": core, "optional": optional}
-
-    print("latest_versions", latest_versions)
 
     # Update requirements.txt with compatible versions and supported Python versions
     update_requirements_with_python_versions(latest_versions, python_version, success)
