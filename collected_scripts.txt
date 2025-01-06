@@ -1,0 +1,2281 @@
+# Total Document Length: 74214 characters
+
+
+--------------------------------------------------------------------------------
+File: tests/__init__.py
+--------------------------------------------------------------------------------
+
+
+
+
+
+--------------------------------------------------------------------------------
+File: memory/memory_manager.py
+--------------------------------------------------------------------------------
+
+class MemoryManager:
+    def __init__(self, backend="langchain", **kwargs):
+        if backend == "langchain":
+            self.adapter = LangChainAdapter(**kwargs)
+        elif backend == "llama_index":
+            self.adapter = LlamaIndexAdapter(index_path=kwargs.get("index_path", "index.json"))
+        else:
+            raise ValueError("Unsupported backend")
+
+    def add_documents(self, documents):
+        self.adapter.add_documents(documents)
+
+    def query(self, query, filters=None):
+        return self.adapter.query(query, filters)
+
+    def delete(self, document_ids):
+        self.adapter.delete(document_ids)
+
+
+
+--------------------------------------------------------------------------------
+File: memory/centralized_index.py
+--------------------------------------------------------------------------------
+
+from datetime import datetime, timedelta
+try:
+    from llama_index import GPTSimpleVectorIndex, Document
+    LLAMA_INDEX_AVAILABLE = True
+except ImportError:
+    GPTSimpleVectorIndex = None
+    Document = None
+    LLAMA_INDEX_AVAILABLE = False
+
+
+class CentralizedIndex:
+    def __init__(self, index_path="memory_index.json", expiration_days=None):
+        """
+        Centralized index for long-term memory and shared knowledge.
+
+        :param index_path: Path to store the index file.
+        :param expiration_days: Number of days before memory fades (optional).
+        """
+        self.index_path = index_path
+        self.expiration_days = expiration_days
+        self._indexing_is_available = LLAMA_INDEX_AVAILABLE
+
+        if not LLAMA_INDEX_AVAILABLE:
+            self.index = None
+            print("LlamaIndex is not installed. Memory indexing features are disabled.")
+            return
+
+        # Try to load an existing index or create a new one
+        try:
+            self.index = GPTSimpleVectorIndex.load_from_disk(index_path)
+        except FileNotFoundError:
+            self.index = GPTSimpleVectorIndex([])
+
+    @property
+    def indexing_is_available(self):
+        """Check if indexing is available."""
+        return self._indexing_is_available
+
+    def add_documents(self, docs):
+        """
+        Add documents to the centralized index.
+
+        :param docs: List of documents with text and optional metadata.
+        """
+        if not self.indexing_is_available:
+            print("Indexing features are unavailable.")
+            return
+
+        documents = [
+            Document(text=doc["text"], metadata={
+                **doc.get("metadata", {}),
+                "timestamp": datetime.now().isoformat()  # Add a timestamp to each document
+            })
+            for doc in docs
+        ]
+        self.index.insert(documents)
+        self.index.save_to_disk(self.index_path)
+
+    def query(self, query_text, metadata_filter=None):
+        """
+        Query the index with optional metadata filtering.
+
+        :param query_text: The text query.
+        :param metadata_filter: Dictionary of metadata filters (optional).
+        :return: Filtered results based on the query and metadata.
+        """
+        if not self.indexing_is_available:
+            print("Indexing features are unavailable.")
+            return []
+
+        results = self.index.query(query_text)
+
+        # Apply metadata filtering if specified
+        if metadata_filter:
+            results = [
+                res for res in results
+                if all(res.extra_info.get(key) == value for key, value in metadata_filter.items())
+            ]
+        return results
+
+    def purge_expired_documents(self):
+        """
+        Remove documents from the index that have exceeded the expiration period.
+        """
+        if not self.indexing_is_available or self.expiration_days is None:
+            return
+
+        now = datetime.now()
+        valid_documents = []
+        for doc in self.index.documents:
+            timestamp = doc.extra_info.get("timestamp")
+            if timestamp:
+                doc_time = datetime.fromisoformat(timestamp)
+                if (now - doc_time) <= timedelta(days=self.expiration_days):
+                    valid_documents.append(doc)
+
+        self.index = GPTSimpleVectorIndex(valid_documents)
+        self.index.save_to_disk(self.index_path)
+
+
+
+--------------------------------------------------------------------------------
+File: memory/rerankers/rerank.py
+--------------------------------------------------------------------------------
+
+class BaseReranker:
+    """
+    A base class for all rerankers in LangSwarm.
+
+    Methods:
+        rerank(query: str, documents: list) -> list:
+            Rerank the provided documents based on the query.
+    """
+    def rerank(self, query, documents):
+        raise NotImplementedError("Subclasses must implement the `rerank` method.")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/rerankers/hugging_face.py
+--------------------------------------------------------------------------------
+
+class HuggingFaceReranker(BaseReranker):
+    def __init__(self, model_name="all-MiniLM-L6-v2"):
+        from sentence_transformers import SentenceTransformer, util
+        self.model = SentenceTransformer(model_name)
+
+    def rerank(self, query, documents):
+        query_embedding = self.model.encode(query, convert_to_tensor=True)
+        results = []
+        for doc in documents:
+            doc_embedding = self.model.encode(doc['text'], convert_to_tensor=True)
+            score = util.pytorch_cos_sim(query_embedding, doc_embedding).item()
+            results.append({"text": doc["text"], "metadata": doc.get("metadata", {}), "score": score})
+        return sorted(results, key=lambda x: x["score"], reverse=True)
+
+
+class HuggingFaceSemanticReranker(BaseReranker):
+    """
+    Reranks documents based on semantic similarity using Hugging Face models.
+
+    Supports pre-trained and fine-tuned models for specific domains.
+
+    Pre-Trained and Domain-Specific Models:
+    ---------------------------------------
+    General Models:
+        - "all-MiniLM-L6-v2": Lightweight, general-purpose semantic similarity.
+        - "all-mpnet-base-v2": High-performance general-purpose model.
+    
+    Domain-Specific Models:
+        - Biomedical:
+            - "sci-bert/scibert-scivocab-uncased": Optimized for scientific research.
+            - "biobert-v1.1": Fine-tuned for biomedical text.
+        - Legal:
+            - "nlpaueb/legal-bert-base-uncased": Designed for legal documents.
+        - Finance:
+            - "finbert": Fine-tuned for financial data.
+        - Customer Support:
+            - "paraphrase-multilingual-mpnet-base-v2": Multilingual customer query handling.
+
+    Usage Example:
+    --------------
+    1. Initialize the reranker:
+        reranker = HuggingFaceSemanticReranker(model_name="biobert-v1.1")
+
+    2. Provide query and documents:
+        query = "What are the effects of this drug on the immune system?"
+        documents = [
+            {"text": "This drug enhances immune response in patients with cancer."},
+            {"text": "The medication targets immune cells to reduce inflammation."},
+        ]
+
+    3. Perform reranking:
+        results = reranker.rerank(query, documents)
+
+    Returns:
+        A list of documents sorted by relevance score.
+    """
+    def __init__(self, model_name="all-MiniLM-L6-v2"):
+        """
+        Initialize the reranker with a Hugging Face model.
+
+        Args:
+            model_name (str): Name of the Hugging Face model to use.
+        """
+        from sentence_transformers import SentenceTransformer, util
+        self.model = SentenceTransformer(model_name)
+
+    def rerank(self, query, documents):
+        """
+        Rerank documents based on semantic similarity to the query.
+
+        Args:
+            query (str): The query string.
+            documents (list): List of documents with 'text' and optional 'metadata'.
+
+        Returns:
+            list: Documents sorted by relevance score.
+        """
+        query_embedding = self.model.encode(query, convert_to_tensor=True)
+        results = []
+        for doc in documents:
+            doc_embedding = self.model.encode(doc["text"], convert_to_tensor=True)
+            score = util.pytorch_cos_sim(query_embedding, doc_embedding).item()
+            results.append({"text": doc["text"], "metadata": doc.get("metadata", {}), "score": score})
+        return sorted(results, key=lambda x: x["score"], reverse=True)
+
+
+class HuggingFaceDPRReranker(BaseReranker):
+    def __init__(self, model_name="facebook/dpr-question_encoder-single-nq-base"):
+        from transformers import DPRQuestionEncoder, DPRQuestionEncoderTokenizer, DPRContextEncoder
+        self.query_model = DPRQuestionEncoder.from_pretrained(model_name)
+        self.query_tokenizer = DPRQuestionEncoderTokenizer.from_pretrained(model_name)
+        self.context_model = DPRContextEncoder.from_pretrained(model_name)
+
+    def rerank(self, query, documents):
+        """
+        Rerank documents using Dense Passage Retrieval (DPR).
+        """
+        query_inputs = self.query_tokenizer(query, return_tensors="pt")
+        query_embedding = self.query_model(**query_inputs).pooler_output
+
+        results = []
+        for doc in documents:
+            context_inputs = self.query_tokenizer(doc["text"], return_tensors="pt")
+            context_embedding = self.context_model(**context_inputs).pooler_output
+            score = (query_embedding * context_embedding).sum().item()
+            results.append({"text": doc["text"], "metadata": doc.get("metadata", {}), "score": score})
+        return sorted(results, key=lambda x: x["score"], reverse=True)
+
+
+
+
+
+--------------------------------------------------------------------------------
+File: memory/rerankers/langchain.py
+--------------------------------------------------------------------------------
+
+class LangChainEmbeddingReranker(BaseReranker):
+    def __init__(self, embedding_function):
+        self.embedding_function = embedding_function
+
+    def rerank(self, query, documents):
+        """
+        Rerank documents using LangChain embeddings.
+        """
+        query_embedding = self.embedding_function.embed_query(query)
+        results = []
+        for doc in documents:
+            doc_embedding = self.embedding_function.embed_text(doc["text"])
+            score = sum(q * d for q, d in zip(query_embedding, doc_embedding))
+            results.append({"text": doc["text"], "metadata": doc.get("metadata", {}), "score": score})
+        return sorted(results, key=lambda x: x["score"], reverse=True)
+
+
+
+
+
+--------------------------------------------------------------------------------
+File: memory/rerankers/workflows.py
+--------------------------------------------------------------------------------
+
+class CombinedRerankingWorkflow:
+    """
+    Combines multiple reranking strategies (e.g., semantic similarity and metadata-based scoring)
+    into a unified reranking workflow.
+
+    Attributes:
+        rerankers (list): A list of reranker instances.
+        weights (list): Corresponding weights for each reranker.
+    """
+    def __init__(self, rerankers, weights=None):
+        """
+        Initialize the workflow with rerankers and their weights.
+
+        Args:
+            rerankers (list): List of reranker instances (subclasses of BaseReranker).
+            weights (list): List of weights for each reranker (default: equal weights).
+        """
+        self.rerankers = rerankers
+        if weights is None:
+            self.weights = [1.0 / len(rerankers)] * len(rerankers)
+        else:
+            self.weights = weights
+
+    def run(self, query, documents):
+        """
+        Perform combined reranking.
+
+        Args:
+            query (str): The query string.
+            documents (list): List of documents to rerank.
+
+        Returns:
+            list: Documents sorted by combined scores.
+        """
+        # Initialize scores for each document
+        scores = {doc["text"]: 0.0 for doc in documents}
+
+        # Iterate over each reranker and aggregate scores
+        for reranker, weight in zip(self.rerankers, self.weights):
+            ranked_docs = reranker.rerank(query, documents)
+            for doc in ranked_docs:
+                scores[doc["text"]] += doc["score"] * weight
+
+        # Sort documents by combined scores
+        combined_results = [{"text": doc, "score": score} for doc, score in scores.items()]
+        return sorted(combined_results, key=lambda x: x["score"], reverse=True)
+
+
+
+--------------------------------------------------------------------------------
+File: memory/rerankers/openai.py
+--------------------------------------------------------------------------------
+
+class OpenAIReranker(BaseReranker):
+    def __init__(self, model_name="gpt-4"):
+        from langchain.llms import OpenAI
+        self.llm = OpenAI(model_name=model_name)
+
+    def rerank(self, query, documents):
+        prompt = f"Rerank the following documents based on their relevance to the query:\n\nQuery: {query}\n"
+        for idx, doc in enumerate(documents, 1):
+            prompt += f"{idx}. {doc['text']}\n"
+        prompt += "\nReturn the sorted order of document indices."
+
+        response = self.llm(prompt)
+        ranking = map(int, response.split())  # Extract indices
+        return [documents[i - 1] for i in ranking]
+
+
+
+--------------------------------------------------------------------------------
+File: memory/rerankers/misc.py
+--------------------------------------------------------------------------------
+
+class BM25Reranker(BaseReranker):
+    def __init__(self, documents):
+        from rank_bm25 import BM25Okapi
+        self.bm25 = BM25Okapi([doc["text"].split() for doc in documents])
+
+    def rerank(self, query, documents):
+        """
+        Rerank documents using BM25 scoring.
+        """
+        scores = self.bm25.get_scores(query.split())
+        for doc, score in zip(documents, scores):
+            doc["score"] = score
+        return sorted(documents, key=lambda x: x["score"], reverse=True)
+
+
+class MetadataReranker(BaseReranker):
+    def __init__(self, metadata_field, reverse=True):
+        self.metadata_field = metadata_field
+        self.reverse = reverse
+
+    def rerank(self, query, documents):
+        """
+        Rerank documents based on a metadata field.
+        """
+        return sorted(
+            documents,
+            key=lambda doc: doc.get("metadata", {}).get(self.metadata_field, 0),
+            reverse=self.reverse
+        )
+
+
+
+--------------------------------------------------------------------------------
+File: memory/adapters/database_adapter.py
+--------------------------------------------------------------------------------
+
+class DatabaseAdapter:
+    def add_documents(self, documents):
+        raise NotImplementedError("Subclasses must implement add_documents()")
+
+    def query(self, query, filters=None):
+        raise NotImplementedError("Subclasses must implement query()")
+
+    def delete(self, document_ids):
+        raise NotImplementedError("Subclasses must implement delete()")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/adapters/langchain.py
+--------------------------------------------------------------------------------
+
+from .database_adapter import DatabaseAdapter
+
+try:
+    from langchain.embeddings.openai import OpenAIEmbeddings
+except ImportError:
+    OpenAIEmbeddings = None
+    
+try:
+    from langchain.vectorstores import Pinecone
+    import pinecone
+except ImportError:
+    Pinecone = None
+
+try:
+    from langchain.vectorstores import Weaviate
+except ImportError:
+    Weaviate = None
+
+try:
+    from langchain.vectorstores import Milvus
+except ImportError:
+    Milvus = None
+
+try:
+    from langchain.vectorstores import Qdrant
+except ImportError:
+    Qdrant = None
+
+try:
+    from langchain.vectorstores import SQLite
+except ImportError:
+    SQLite = None
+
+
+class PineconeAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if all(var is not None for var in (Pinecone, OpenAIEmbeddings)):
+            pinecone.init(api_key=kwargs["api_key"], environment=kwargs["environment"])
+            self.db = Pinecone(index_name=kwargs["index_name"], embedding_function=OpenAIEmbeddings())
+        else:
+            raise ValueError("Unsupported vector database. Make sure LangChain and Pinecone packages are installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        return self.db.similarity_search(query, filter=filters)
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.db.delete(doc_id)
+
+
+class WeaviateAdapter(DatabaseAdapter):
+    """
+    When working with LangChain's Weaviate integration, you can optionally provide 
+    this client if you already have a preconfigured or specialized Weaviate client 
+    setup. Otherwise, LangChain can initialize its own connection to the Weaviate 
+    instance based on the url and authentication details provided.
+    """
+    def __init__(self, *args, **kwargs):
+        if all(var is not None for var in (Weaviate, OpenAIEmbeddings)):
+            self.db = Weaviate(
+                url=kwargs["weaviate_url"],
+                embedding_function=OpenAIEmbeddings(),
+                client=kwargs.get("weaviate_client", None)  # Optional: Add Weaviate client instance if needed
+            )
+        else:
+            raise ValueError("Unsupported vector database. Make sure LangChain and Weaviate packages are installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        return self.db.similarity_search(query, filter=filters)
+
+    def delete(self, document_ids):
+        # Not directly supported in LangChain's Weaviate implementation
+        raise NotImplementedError("Document deletion is not yet supported in WeaviateAdapter.")
+
+
+class MilvusAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if all(var is not None for var in (Milvus, OpenAIEmbeddings)):
+            self.db = Milvus(
+                embedding_function=OpenAIEmbeddings(),
+                collection_name=kwargs["collection_name"],
+                connection_args={
+                    "host": kwargs["milvus_host"],
+                    "port": kwargs["milvus_port"]
+                }
+            )
+        else:
+            raise ValueError("Unsupported vector database. Make sure LangChain and Milvus packages are installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        return self.db.similarity_search(query, filter=filters)
+
+    def delete(self, document_ids):
+        # Not directly supported in LangChain's Milvus implementation
+        raise NotImplementedError("Document deletion is not yet supported in MilvusAdapter.")
+
+
+class QdrantAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if all(var is not None for var in (Qdrant, OpenAIEmbeddings)):
+            self.db = Qdrant(
+                host=kwargs["qdrant_host"],
+                port=kwargs["qdrant_port"],
+                embedding_function=OpenAIEmbeddings(),
+                collection_name=kwargs["collection_name"]
+            )
+        else:
+            raise ValueError("Unsupported vector database. Make sure LangChain and Qdrant packages are installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        return self.db.similarity_search(query, filter=filters)
+
+    def delete(self, document_ids):
+        self.db.delete(ids=document_ids)
+
+
+class SQLiteAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if all(var is not None for var in (SQLite, OpenAIEmbeddings)):
+            self.db = SQLite(
+                embedding_function=OpenAIEmbeddings(),
+                database_path=kwargs["database_path"],
+                table_name=kwargs["table_name"]
+            )
+        else:
+            raise ValueError("Unsupported database. Make sure LangChain and SQLite packages are installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        return self.db.similarity_search(query, filter=filters)
+
+    def delete(self, document_ids):
+        self.db.delete(ids=document_ids)
+
+
+
+--------------------------------------------------------------------------------
+File: memory/adapters/workflows.py
+--------------------------------------------------------------------------------
+
+class HybridRetrievalWorkflow:
+    """
+    Combines dense and sparse retrieval mechanisms to balance semantic relevance
+    and keyword-based matching (e.g., using embeddings and BM25).
+
+    Attributes:
+        dense_retriever (object): A dense retriever (e.g., Pinecone or FAISS).
+        sparse_retriever (object): A sparse retriever (e.g., BM25).
+
+    Usage Example:
+    --------------
+    # Initialize retrievers
+    dense_retriever = PineconeAdapter(pinecone_instance)
+    sparse_retriever = BM25Retriever(documents)
+
+    # Create hybrid workflow
+    hybrid_workflow = HybridRetrievalWorkflow(dense_retriever, sparse_retriever)
+
+    # Perform retrieval
+    results = hybrid_workflow.run("What is LangSwarm?")
+    print("Hybrid Retrieval Results:", results)
+    """
+    def __init__(self, dense_retriever, sparse_retriever):
+        self.dense_retriever = dense_retriever
+        self.sparse_retriever = sparse_retriever
+
+    def run(self, query):
+        """
+        Perform hybrid retrieval.
+
+        Args:
+            query (str): The user's query.
+
+        Returns:
+            list: Merged and deduplicated results.
+        """
+        dense_results = self.dense_retriever.query(query)
+        sparse_results = self.sparse_retriever.query(query)
+
+        # Merge and deduplicate results
+        combined = {doc['text']: doc for doc in dense_results + sparse_results}
+        return list(combined.values())
+
+
+class MultiSourceRetrievalWorkflow:
+    """
+    Retrieves data from multiple sources and aggregates results.
+
+    Attributes:
+        retrievers (list): A list of retrievers for different sources.
+
+    Usage Example:
+    --------------
+    # Initialize multiple retrievers
+    retriever_1 = PineconeAdapter(pinecone_instance)
+    retriever_2 = SQLRetriever(database_uri)
+
+    # Create multi-source workflow
+    multi_source_workflow = MultiSourceRetrievalWorkflow([retriever_1, retriever_2])
+
+    # Perform retrieval
+    results = multi_source_workflow.run("What is LangSwarm?")
+    print("Multi-Source Retrieval Results:", results)
+    """
+    def __init__(self, retrievers):
+        self.retrievers = retrievers
+
+    def run(self, query):
+        """
+        Perform retrieval from all sources.
+
+        Args:
+            query (str): The user's query.
+
+        Returns:
+            list: Combined results from all sources.
+        """
+        all_results = []
+        for retriever in self.retrievers:
+            all_results.extend(retriever.query(query))
+        return all_results
+
+
+class TemporalRetrievalWorkflow:
+    """
+    Retrieves documents based on temporal constraints.
+
+    Attributes:
+        retriever (object): The base retriever.
+        time_filter (function): A function to filter results by time.
+
+    Usage Example:
+    --------------
+    # Define a time filter function
+    def recent_filter(doc):
+        return doc.get("metadata", {}).get("timestamp") >= "2025-01-01"
+
+    # Initialize temporal workflow
+    retriever = PineconeAdapter(pinecone_instance)
+    temporal_workflow = TemporalRetrievalWorkflow(retriever, recent_filter)
+
+    # Perform retrieval
+    results = temporal_workflow.run("What is LangSwarm?")
+    print("Temporal Retrieval Results:", results)
+    """
+    def __init__(self, retriever, time_filter):
+        self.retriever = retriever
+        self.time_filter = time_filter
+
+    def run(self, query):
+        """
+        Retrieve and filter results by time.
+
+        Args:
+            query (str): The user's query.
+
+        Returns:
+            list: Filtered results.
+        """
+        results = self.retriever.query(query)
+        return [doc for doc in results if self.time_filter(doc)]
+
+
+class FederatedRetrievalWorkflow:
+    """
+    Retrieves data from distributed databases or indices.
+
+    Attributes:
+        retrievers (list): A list of distributed retrievers.
+
+    Usage Example:
+    --------------
+    # Initialize distributed retrievers
+    retriever_1 = PineconeAdapter(pinecone_instance)
+    retriever_2 = WeaviateAdapter(weaviate_url)
+
+    # Create federated workflow
+    federated_workflow = FederatedRetrievalWorkflow([retriever_1, retriever_2])
+
+    # Perform retrieval
+    results = federated_workflow.run("What is LangSwarm?")
+    print("Federated Retrieval Results:", results)
+    """
+    def __init__(self, retrievers):
+        self.retrievers = retrievers
+
+    def run(self, query):
+        """
+        Perform federated retrieval.
+
+        Args:
+            query (str): The user's query.
+
+        Returns:
+            list: Combined results from all sources.
+        """
+        all_results = []
+        for retriever in self.retrievers:
+            all_results.extend(retriever.query(query))
+        return all_results
+
+
+class CrossDomainRetrievalWorkflow:
+    """
+    Routes queries to domain-specific retrievers.
+
+    Attributes:
+        domain_retrievers (dict): A dictionary mapping domains to retrievers.
+
+    Usage Example:
+    --------------
+    # Define retrievers for each domain
+    retriever_medical = PineconeAdapter(pinecone_instance)
+    retriever_legal = FAISSAdapter(index_path="legal_index.json")
+
+    # Map retrievers to domains
+    domain_retrievers = {
+        "medical": retriever_medical,
+        "legal": retriever_legal
+    }
+
+    # Create cross-domain workflow
+    cross_domain_workflow = CrossDomainRetrievalWorkflow(domain_retrievers)
+
+    # Perform domain-specific retrieval
+    results = cross_domain_workflow.run("What is LangSwarm?", "medical")
+    print("Cross-Domain Retrieval Results:", results)
+    """
+    def __init__(self, domain_retrievers):
+        self.domain_retrievers = domain_retrievers
+
+    def run(self, query, domain):
+        """
+        Retrieve data from the appropriate domain.
+
+        Args:
+            query (str): The user's query.
+            domain (str): The target domain.
+
+        Returns:
+            list: Results from the specified domain.
+        """
+        retriever = self.domain_retrievers.get(domain)
+        if retriever is None:
+            raise ValueError(f"No retriever found for domain: {domain}")
+        return retriever.query(query)
+
+
+
+--------------------------------------------------------------------------------
+File: memory/adapters/llamaindex.py
+--------------------------------------------------------------------------------
+
+from .database_adapter import DatabaseAdapter
+
+try:
+    from llama_index import GPTSimpleVectorIndex, Document
+except ImportError:
+    GPTSimpleVectorIndex = None
+    Document = None
+
+class LoadFromDiskAdapter(DatabaseAdapter):
+    def __init__(self, index_path="index.json"):
+        if all(var is not None for var in (GPTSimpleVectorIndex, Document)):
+            try:
+                self.index = GPTSimpleVectorIndex.load_from_disk(index_path)
+            except FileNotFoundError:
+                self.index = GPTSimpleVectorIndex([])
+        else:
+            raise ValueError("Unsupported database. Make sure LlamaIndex is installed.")
+
+    def add_documents(self, documents):
+        docs = [Document(text=doc["text"], metadata=doc.get("metadata", {})) for doc in documents]
+        self.index.insert(docs)
+        self.index.save_to_disk()
+
+    def query(self, query, filters=None):
+        results = self.index.query(query)
+        if filters:
+            results = [res for res in results if all(res.extra_info.get(k) == v for k, v in filters.items())]
+        return results
+
+    def delete(self, document_ids):
+        raise NotImplementedError("Delete functionality not implemented for LlamaIndex")
+
+try:
+    import pinecone
+    from llama_index import PineconeIndex, Document
+except ImportError:
+    pinecone = None
+    PineconeIndex = None
+    Document = None
+
+class LlamaIndexPineconeAdapter(LlamaIndexAdapter):
+    """
+    Adapter for Pinecone integration with LlamaIndex.
+
+    Setup:
+        1. Install Pinecone: `pip install pinecone-client`.
+        2. Initialize Pinecone with your API key and environment:
+           ```
+           pinecone.init(api_key="your-api-key", environment="your-environment")
+           ```
+
+    Usage:
+        Add, query, and manage documents in a Pinecone-backed vector index.
+    """
+    def __init__(self, index_name="pinecone-index"):
+        if pinecone is None or PineconeIndex is None:
+            raise ImportError("Pinecone or LlamaIndex is not installed. Please install the required packages.")
+
+        self.index_name = index_name
+        if index_name not in pinecone.list_indexes():
+            pinecone.create_index(index_name, dimension=768)  # Update dimension based on your embedding model
+        self.index = PineconeIndex(index_name=index_name)
+
+    def add_documents(self, documents):
+        docs = [Document(text=doc["text"], metadata=doc.get("metadata", {})) for doc in documents]
+        self.index.insert(docs)
+
+    def query(self, query_text):
+        return self.index.query(query_text)
+
+    def delete(self, document_ids):
+        self.index.delete(document_ids)
+
+
+try:
+    from llama_index import WeaviateIndex, Document
+except ImportError:
+    WeaviateIndex = None
+    Document = None
+
+class LlamaIndexWeaviateAdapter(LlamaIndexAdapter):
+    """
+    Adapter for Weaviate integration with LlamaIndex.
+
+    Setup:
+        1. Install Weaviate client: `pip install weaviate-client`.
+        2. Ensure you have a running Weaviate instance and its URL.
+
+    Usage:
+        Add, query, and manage documents in a Weaviate-backed vector index.
+    """
+    def __init__(self, weaviate_url):
+        if WeaviateIndex is None:
+            raise ImportError("Weaviate or LlamaIndex is not installed. Please install the required packages.")
+
+        self.index = WeaviateIndex(weaviate_url=weaviate_url)
+
+    def add_documents(self, documents):
+        docs = [Document(text=doc["text"], metadata=doc.get("metadata", {})) for doc in documents]
+        self.index.insert(docs)
+
+    def query(self, query_text):
+        return self.index.query(query_text)
+
+    def delete(self, document_ids):
+        raise NotImplementedError("Document deletion is not yet supported for Weaviate.")
+
+
+try:
+    from llama_index import FAISSIndex, Document
+except ImportError:
+    FAISSIndex = None
+    Document = None
+
+class LlamaIndexFAISSAdapter(LlamaIndexAdapter):
+    """
+    Adapter for FAISS integration with LlamaIndex.
+
+    Setup:
+        1. Install FAISS: `pip install faiss-cpu`.
+        2. Initialize a FAISS index for local vector storage.
+
+    Usage:
+        Add, query, and manage documents in a FAISS-backed vector index.
+    """
+    def __init__(self, index_path="faiss_index.json"):
+        if FAISSIndex is None:
+            raise ImportError("FAISS or LlamaIndex is not installed. Please install the required packages.")
+
+        try:
+            self.index = FAISSIndex.load_from_disk(index_path)
+        except FileNotFoundError:
+            self.index = FAISSIndex([])
+
+    def add_documents(self, documents):
+        docs = [Document(text=doc["text"], metadata=doc.get("metadata", {})) for doc in documents]
+        self.index.insert(docs)
+        self.index.save_to_disk("faiss_index.json")
+
+    def query(self, query_text):
+        return self.index.query(query_text)
+
+    def delete(self, document_ids):
+        raise NotImplementedError("Document deletion is not yet supported for FAISS.")
+
+
+try:
+    from llama_index import SQLDatabase, SQLIndex
+except ImportError:
+    SQLDatabase = None
+    SQLIndex = None
+
+class LlamaIndexSQLAdapter(LlamaIndexAdapter):
+    """
+    Adapter for SQL integration with LlamaIndex.
+
+    Setup:
+        1. Install a SQL database driver (e.g., `pip install sqlite`).
+        2. Create and configure your database URI.
+
+    Usage:
+        Add, query, and manage documents in a SQL-backed index.
+    """
+    def __init__(self, database_uri, index_path="sql_index.json"):
+        if SQLDatabase is None or SQLIndex is None:
+            raise ImportError("SQLDatabase or LlamaIndex is not installed. Please install the required packages.")
+
+        self.sql_db = SQLDatabase(database_uri=database_uri)
+        try:
+            self.index = SQLIndex.load_from_disk(index_path)
+        except FileNotFoundError:
+            self.index = SQLIndex([], sql_database=self.sql_db)
+
+    def add_documents(self, documents):
+        for doc in documents:
+            self.sql_db.insert({"text": doc["text"], **doc.get("metadata", {})})
+        self.index.refresh()
+
+    def query(self, query_text):
+        return self.index.query(query_text)
+
+    def delete(self, document_ids):
+        raise NotImplementedError("Document deletion is not yet supported for SQL.")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/templates/biomed.py
+--------------------------------------------------------------------------------
+
+from langswarm.agent import LangSwarmAgent
+from retrievers import BiomedicalRetriever  # Placeholder for your retriever implementation
+from rerankers import BiomedicalReranker  # Placeholder for your reranker implementation
+
+class BiomedicalSearchWorkflow:
+    """
+    Workflow for retrieving and ranking biomedical literature for research or clinical use.
+
+    Specification:
+    - Initialize a LangSwarm agent.
+    - Set up a biomedical retriever and a domain-specific reranker.
+    - Fetch, process, and load biomedical data into the retriever backend.
+    - Handle user queries and provide ranked biomedical document results.
+    - Implement fallback for cases where no documents are retrieved or reranked.
+    """
+
+    def __init__(self, retriever_config, reranker_config, biomedical_data):
+        """
+        Initialize the biomedical data search workflow.
+
+        Args:
+            retriever_config (dict): Configuration for setting up the biomedical retriever.
+            reranker_config (dict): Configuration for the biomedical-specific reranker.
+            biomedical_data (list): Data for populating the retriever backend.
+        """
+        # Initialize LangSwarm agent
+        self.agent = LangSwarmAgent()
+
+        # Initialize retriever and reranker
+        self.retriever = BiomedicalRetriever(**retriever_config)
+        self.reranker = BiomedicalReranker(**reranker_config)
+
+        # Data Fetch and Processing
+        self.processed_data = self.process_data(biomedical_data)
+
+        # Data Load
+        self.load_data_to_retriever()
+
+    def process_data(self, raw_data):
+        """
+        Process the raw data into retriever-compatible formats.
+
+        Args:
+            raw_data (list): List of raw biomedical data.
+
+        Returns:
+            list: Processed data ready for loading.
+        """
+        return [{"text": entry.strip(), "metadata": {"domain": "biomedical"}} for entry in raw_data]
+
+    def load_data_to_retriever(self):
+        """
+        Load the processed data into the retriever backend.
+        """
+        self.retriever.add_documents(self.processed_data)
+
+    def run(self, query):
+        """
+        Execute the biomedical data search workflow.
+
+        Args:
+            query (str): User's query.
+
+        Returns:
+            str: Response generated by the LangSwarm agent, or None if no results are found.
+        """
+        # Retrieve documents
+        documents = self.retriever.query(query)
+
+        if not documents:
+            print("No biomedical documents retrieved.")
+            return None
+
+        # Rerank documents
+        reranked_documents = self.reranker.rerank(query, documents)
+
+        if not reranked_documents:
+            print("No documents could be reranked.")
+            return None
+
+        # Concatenate input for the agent
+        context = reranked_documents[0]["text"]
+        agent_input = f"Query: {query}\nContext: {context}"
+
+        # Generate and return response
+        return self.agent.generate_response(agent_input)
+
+
+# **Usage Example**
+
+if __name__ == "__main__":
+    # Example configuration and biomedical data
+    retriever_config = {"backend": "pinecone", "api_key": "your-api-key"}
+    reranker_config = {"model_name": "biobert"}  # Example biomedical-specific model
+    biomedical_data = [
+        "Study 1: Impact of LangSwarm on clinical decision-making.",
+        "Study 2: Reinforcement learning in personalized medicine.",
+        "Study 3: Large language models in drug discovery."
+    ]
+
+    # Initialize workflow
+    biomedical_search = BiomedicalSearchWorkflow(retriever_config, reranker_config, biomedical_data)
+
+    # User query
+    user_query = "How are large language models used in drug discovery?"
+
+    # Run the workflow
+    response = biomedical_search.run(user_query)
+
+    if response:
+        print("Biomedical Search Response:", response)
+    else:
+        print("No relevant response could be generated.")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/templates/customer_support.py
+--------------------------------------------------------------------------------
+
+from langswarm.agent import LangSwarmAgent
+from retrievers import FAQRetriever, TicketRetriever  # Placeholder for your retriever implementations
+from rerankers import CombinedReranker  # Placeholder for your reranker implementation
+
+class CustomerSupportWorkflow:
+    """
+    Workflow for automating customer support by retrieving and ranking relevant FAQs and ticket data.
+
+    Specification:
+    - Initialize a LangSwarm agent.
+    - Set up retrievers for FAQs and ticket data, along with a combined reranker.
+    - Fetch, process, and load data into respective retriever backends.
+    - Handle user queries and generate contextual responses.
+    - Implement fallback for cases where no documents are retrieved or reranked.
+    """
+
+    def __init__(self, faq_retriever_config, ticket_retriever_config, reranker_config, faq_data, ticket_data):
+        """
+        Initialize the customer support workflow.
+
+        Args:
+            faq_retriever_config (dict): Configuration for setting up the FAQ retriever.
+            ticket_retriever_config (dict): Configuration for setting up the ticket retriever.
+            reranker_config (dict): Configuration for the combined reranker.
+            faq_data (list): Data for populating the FAQ retriever.
+            ticket_data (list): Data for populating the ticket retriever.
+        """
+        # Initialize LangSwarm agent
+        self.agent = LangSwarmAgent()
+
+        # Initialize retrievers
+        self.faq_retriever = FAQRetriever(**faq_retriever_config)
+        self.ticket_retriever = TicketRetriever(**ticket_retriever_config)
+
+        # Initialize reranker
+        self.reranker = CombinedReranker(**reranker_config)
+
+        # Data Fetch and Processing
+        self.processed_faq_data = self.process_data(faq_data)
+        self.processed_ticket_data = self.process_data(ticket_data)
+
+        # Data Load
+        self.load_data_to_retrievers()
+
+    def process_data(self, raw_data):
+        """
+        Process the raw data into retriever-compatible formats.
+
+        Args:
+            raw_data (list): List of raw data.
+
+        Returns:
+            list: Processed data ready for loading.
+        """
+        return [{"text": entry.strip(), "metadata": {}} for entry in raw_data]
+
+    def load_data_to_retrievers(self):
+        """
+        Load the processed data into respective retriever backends.
+        """
+        self.faq_retriever.add_documents(self.processed_faq_data)
+        self.ticket_retriever.add_documents(self.processed_ticket_data)
+
+    def run(self, query):
+        """
+        Execute the customer support workflow.
+
+        Args:
+            query (str): User's query.
+
+        Returns:
+            str: Response generated by the LangSwarm agent, or None if no results are found.
+        """
+        # Retrieve FAQs and ticket data
+        faq_documents = self.faq_retriever.query(query)
+        ticket_documents = self.ticket_retriever.query(query)
+
+        if not faq_documents and not ticket_documents:
+            print("No documents retrieved from FAQs or tickets.")
+            return None
+
+        # Combine documents and rerank
+        combined_documents = faq_documents + ticket_documents
+        reranked_documents = self.reranker.rerank(query, combined_documents)
+
+        if not reranked_documents:
+            print("No documents could be reranked.")
+            return None
+
+        # Concatenate input for the agent
+        context = reranked_documents[0]["text"]
+        agent_input = f"Query: {query}\nContext: {context}"
+
+        # Generate and return response
+        return self.agent.generate_response(agent_input)
+
+
+# **Usage Example**
+
+if __name__ == "__main__":
+    # Example configurations and data
+    faq_retriever_config = {"backend": "pinecone", "api_key": "your-api-key"}
+    ticket_retriever_config = {"backend": "sqlite", "connection_string": "sqlite:///tickets.db"}
+    reranker_config = {"weights": [0.6, 0.4]}  # Example weights for FAQs and tickets
+    faq_data = ["What are the support hours?", "How can I reset my password?"]
+    ticket_data = ["Ticket 123: Reset password issue.", "Ticket 456: Unable to access account."]
+
+    # Initialize workflow
+    customer_support = CustomerSupportWorkflow(
+        faq_retriever_config, ticket_retriever_config, reranker_config, faq_data, ticket_data
+    )
+
+    # User query
+    user_query = "How do I reset my password?"
+
+    # Run the workflow
+    response = customer_support.run(user_query)
+
+    if response:
+        print("Customer Support Response:", response)
+    else:
+        print("No relevant response could be generated.")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/templates/legal.py
+--------------------------------------------------------------------------------
+
+from langswarm.agent import LangSwarmAgent
+from retrievers import LegalRetriever  # Placeholder for your retriever implementation
+from rerankers import LegalReranker  # Placeholder for your reranker implementation
+
+class LegalDocumentWorkflow:
+    """
+    Workflow for retrieving and analyzing legal documents for case preparation.
+
+    Specification:
+    - Initialize a LangSwarm agent.
+    - Set up a legal retriever and a legal domain-specific reranker.
+    - Fetch, process, and load legal data into the retriever backend.
+    - Handle user queries and provide ranked legal document results.
+    - Implement fallback for cases where no documents are retrieved or reranked.
+    """
+
+    def __init__(self, retriever_config, reranker_config, legal_data):
+        """
+        Initialize the legal document assistant workflow.
+
+        Args:
+            retriever_config (dict): Configuration for setting up the legal retriever.
+            reranker_config (dict): Configuration for the legal domain-specific reranker.
+            legal_data (list): Data for populating the retriever backend.
+        """
+        # Initialize LangSwarm agent
+        self.agent = LangSwarmAgent()
+
+        # Initialize retriever and reranker
+        self.retriever = LegalRetriever(**retriever_config)
+        self.reranker = LegalReranker(**reranker_config)
+
+        # Data Fetch and Processing
+        self.processed_data = self.process_data(legal_data)
+
+        # Data Load
+        self.load_data_to_retriever()
+
+    def process_data(self, raw_data):
+        """
+        Process the raw data into retriever-compatible formats.
+
+        Args:
+            raw_data (list): List of raw legal data.
+
+        Returns:
+            list: Processed data ready for loading.
+        """
+        return [{"text": entry.strip(), "metadata": {"type": "legal"}} for entry in raw_data]
+
+    def load_data_to_retriever(self):
+        """
+        Load the processed data into the retriever backend.
+        """
+        self.retriever.add_documents(self.processed_data)
+
+    def run(self, query):
+        """
+        Execute the legal document assistant workflow.
+
+        Args:
+            query (str): User's query.
+
+        Returns:
+            str: Response generated by the LangSwarm agent, or None if no results are found.
+        """
+        # Retrieve documents
+        documents = self.retriever.query(query)
+
+        if not documents:
+            print("No legal documents retrieved.")
+            return None
+
+        # Rerank documents
+        reranked_documents = self.reranker.rerank(query, documents)
+
+        if not reranked_documents:
+            print("No documents could be reranked.")
+            return None
+
+        # Concatenate input for the agent
+        context = reranked_documents[0]["text"]
+        agent_input = f"Query: {query}\nContext: {context}"
+
+        # Generate and return response
+        return self.agent.generate_response(agent_input)
+
+
+# **Usage Example**
+
+if __name__ == "__main__":
+    # Example configuration and legal data
+    retriever_config = {"backend": "faiss", "index_path": "legal_index.faiss"}
+    reranker_config = {"model_name": "legal-bert"}  # Example domain-specific model
+    legal_data = [
+        "Case 1: LangSwarm v. AI Tech Corp.",
+        "Case 2: Copyright law in the age of AI.",
+        "Case 3: Privacy and data protection regulations."
+    ]
+
+    # Initialize workflow
+    legal_assistant = LegalDocumentWorkflow(retriever_config, reranker_config, legal_data)
+
+    # User query
+    user_query = "What are the key points in LangSwarm v. AI Tech Corp.?"
+
+    # Run the workflow
+    response = legal_assistant.run(user_query)
+
+    if response:
+        print("Legal Assistant Response:", response)
+    else:
+        print("No relevant response could be generated.")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/templates/chatbot.py
+--------------------------------------------------------------------------------
+
+from langswarm.agent import LangSwarmAgent
+from retrievers import HybridRetriever  # Placeholder for your retriever implementation
+from rerankers import SemanticReranker  # Placeholder for your reranker implementation
+
+class ChatbotWorkflow:
+    """
+    Chatbot workflow that retrieves context from a knowledge base, reranks responses,
+    and generates a reply using a LangSwarm agent.
+
+    Specification:
+    - Initialize a LangSwarm agent.
+    - Set up the retriever(s) and reranker(s).
+    - Fetch, process, and load data into the retriever backend.
+    - Handle user queries and generate a contextual response.
+    - Implement fallback for cases where no documents are retrieved or reranked.
+    """
+
+    def __init__(self, retriever_config, reranker_config, data_files):
+        """
+        Initialize the chatbot workflow.
+
+        Args:
+            retriever_config (dict): Configuration for setting up the retriever.
+            reranker_config (dict): Configuration for setting up the reranker.
+            data_files (list): List of paths to data files to be loaded.
+        """
+        # Initialize LangSwarm agent
+        self.agent = LangSwarmAgent()
+
+        # Initialize retriever and reranker
+        self.retriever = HybridRetriever(**retriever_config)
+        self.reranker = SemanticReranker(**reranker_config)
+
+        # Data Fetch and Processing
+        self.data = self.fetch_data(data_files)
+        self.processed_data = self.process_data(self.data)
+
+        # Data Load
+        self.load_data_to_retriever(self.processed_data)
+
+    def fetch_data(self, data_files):
+        """
+        Fetch data from files.
+
+        Args:
+            data_files (list): List of file paths.
+
+        Returns:
+            list: Raw data fetched from the files.
+        """
+        raw_data = []
+        for file in data_files:
+            with open(file, 'r') as f:
+                raw_data.extend(f.readlines())
+        return raw_data
+
+    def process_data(self, raw_data):
+        """
+        Process the raw data into the format required by the retriever.
+
+        Args:
+            raw_data (list): List of raw data.
+
+        Returns:
+            list: Processed data in retriever-compatible format.
+        """
+        processed_data = []
+        for line in raw_data:
+            processed_data.append({"text": line.strip(), "metadata": {}})
+        return processed_data
+
+    def load_data_to_retriever(self, processed_data):
+        """
+        Load the processed data into the retriever backend.
+
+        Args:
+            processed_data (list): Data ready to be loaded.
+        """
+        self.retriever.add_documents(processed_data)
+
+    def run(self, query):
+        """
+        Execute the chatbot workflow.
+
+        Args:
+            query (str): User's query.
+
+        Returns:
+            str: Chatbot response generated by the LangSwarm agent, or None if no results are found.
+        """
+        # Retrieve and rerank
+        documents = self.retriever.query(query)
+        if not documents:
+            print("No documents retrieved.")
+            return None
+
+        reranked_documents = self.reranker.rerank(query, documents)
+        if not reranked_documents:
+            print("No documents could be reranked.")
+            return None
+
+        # Concatenate input for the agent
+        context = reranked_documents[0]["text"]
+        agent_input = f"Query: {query}\nContext: {context}"
+
+        # Generate and return response
+        return self.agent.generate_response(agent_input)
+
+
+# **Usage Example**
+
+if __name__ == "__main__":
+    # Example configuration and data files
+    retriever_config = {"backend": "pinecone", "api_key": "your-api-key"}
+    reranker_config = {"model_name": "all-MiniLM-L6-v2"}
+    data_files = ["knowledge_base.txt"]
+
+    # Initialize workflow
+    chatbot = ChatbotWorkflow(retriever_config, reranker_config, data_files)
+
+    # User query
+    user_query = "What is LangSwarm?"
+
+    # Run the workflow
+    response = chatbot.run(user_query)
+
+    if response:
+        print("Chatbot Response:", response)
+    else:
+        print("No relevant response could be generated.")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/templates/federated.py
+--------------------------------------------------------------------------------
+
+from langswarm.agent import LangSwarmAgent
+from retrievers import DistributedRetriever  # Placeholder for your retriever implementation
+
+class FederatedKnowledgeWorkflow:
+    """
+    Workflow for retrieving data from distributed knowledge repositories.
+
+    Specification:
+    - Initialize a LangSwarm agent.
+    - Set up multiple retrievers for distributed knowledge sources.
+    - Fetch, process, and load data into respective retriever backends.
+    - Handle user queries and aggregate results from all sources.
+    - Implement fallback for cases where no documents are retrieved.
+    """
+
+    def __init__(self, retriever_configs, data_sources):
+        """
+        Initialize the federated knowledge workflow.
+
+        Args:
+            retriever_configs (list): List of configurations for setting up distributed retrievers.
+            data_sources (list): List of data sources (files or database connections).
+        """
+        # Initialize LangSwarm agent
+        self.agent = LangSwarmAgent()
+
+        # Initialize distributed retrievers
+        self.retrievers = [DistributedRetriever(**config) for config in retriever_configs]
+
+        # Data Fetch and Processing
+        self.data = self.fetch_data(data_sources)
+        self.processed_data = self.process_data(self.data)
+
+        # Data Load
+        self.load_data_to_retrievers()
+
+    def fetch_data(self, data_sources):
+        """
+        Fetch data from distributed sources.
+
+        Args:
+            data_sources (list): List of file paths or database queries.
+
+        Returns:
+            dict: Raw data fetched from each source, keyed by retriever index.
+        """
+        raw_data = {}
+        for i, source in enumerate(data_sources):
+            if isinstance(source, str):  # File source
+                with open(source, 'r') as f:
+                    raw_data[i] = f.readlines()
+            elif callable(source):  # Database query function
+                raw_data[i] = source()  # Assume the function returns a list of records
+        return raw_data
+
+    def process_data(self, raw_data):
+        """
+        Process the raw data into retriever-compatible formats.
+
+        Args:
+            raw_data (dict): Raw data keyed by retriever index.
+
+        Returns:
+            dict: Processed data ready for loading, keyed by retriever index.
+        """
+        processed_data = {}
+        for idx, data in raw_data.items():
+            processed_data[idx] = [{"text": entry.strip(), "metadata": {}} for entry in data]
+        return processed_data
+
+    def load_data_to_retrievers(self):
+        """
+        Load the processed data into respective retriever backends.
+        """
+        for idx, retriever in enumerate(self.retrievers):
+            retriever.add_documents(self.processed_data[idx])
+
+    def run(self, query):
+        """
+        Execute the federated knowledge access workflow.
+
+        Args:
+            query (str): User's query.
+
+        Returns:
+            str: Aggregated response generated by the LangSwarm agent, or None if no results are found.
+        """
+        # Retrieve documents from all sources
+        all_documents = []
+        for retriever in self.retrievers:
+            documents = retriever.query(query)
+            if not documents:
+                print(f"No documents retrieved from retriever {retriever}.")
+                continue
+            all_documents.extend(documents)
+
+        if not all_documents:
+            print("No documents retrieved from any distributed sources.")
+            return None
+
+        # Concatenate input for the agent
+        context = "\n".join([doc["text"] for doc in all_documents[:5]])  # Top 5 results
+        agent_input = f"Query: {query}\nAggregated Context:\n{context}"
+
+        # Generate and return response
+        return self.agent.generate_response(agent_input)
+
+
+# **Usage Example**
+
+if __name__ == "__main__":
+    # Example configurations and data sources
+    retriever_configs = [
+        {"backend": "pinecone", "api_key": "your-api-key"},
+        {"backend": "elasticsearch", "connection_string": "http://localhost:9200"}
+    ]
+    data_sources = [
+        "distributed_knowledge_1.txt",
+        lambda: ["Record 1 from DB", "Record 2 from DB"]
+    ]
+
+    # Initialize workflow
+    federated_knowledge = FederatedKnowledgeWorkflow(retriever_configs, data_sources)
+
+    # User query
+    user_query = "What are the current trends in AI?"
+
+    # Run the workflow
+    response = federated_knowledge.run(user_query)
+
+    if response:
+        print("Federated Knowledge Response:", response)
+    else:
+        print("No relevant response could be generated.")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/templates/multilingual.py
+--------------------------------------------------------------------------------
+
+from langswarm.agent import LangSwarmAgent
+from retrievers import MultilingualRetriever  # Placeholder for your retriever implementation
+from translators import Translator  # Placeholder for your translation implementation
+
+class MultilingualKnowledgeWorkflow:
+    """
+    Workflow for retrieving and translating knowledge across multiple languages.
+
+    Specification:
+    - Initialize a LangSwarm agent.
+    - Set up a multilingual retriever and translator.
+    - Fetch, process, and load multilingual data into the retriever backend.
+    - Handle user queries and provide translated results.
+    - Implement fallback for cases where no documents are retrieved or translation fails.
+    """
+
+    def __init__(self, retriever_config, translator_config, multilingual_data):
+        """
+        Initialize the multilingual knowledge retrieval workflow.
+
+        Args:
+            retriever_config (dict): Configuration for setting up the multilingual retriever.
+            translator_config (dict): Configuration for setting up the translator.
+            multilingual_data (list): Data for populating the retriever backend.
+        """
+        # Initialize LangSwarm agent
+        self.agent = LangSwarmAgent()
+
+        # Initialize retriever and translator
+        self.retriever = MultilingualRetriever(**retriever_config)
+        self.translator = Translator(**translator_config)
+
+        # Data Fetch and Processing
+        self.processed_data = self.process_data(multilingual_data)
+
+        # Data Load
+        self.load_data_to_retriever()
+
+    def process_data(self, raw_data):
+        """
+        Process the raw data into retriever-compatible formats.
+
+        Args:
+            raw_data (list): List of raw multilingual data.
+
+        Returns:
+            list: Processed data ready for loading.
+        """
+        return [{"text": entry["text"].strip(), "metadata": {"language": entry["language"]}} for entry in raw_data]
+
+    def load_data_to_retriever(self):
+        """
+        Load the processed data into the retriever backend.
+        """
+        self.retriever.add_documents(self.processed_data)
+
+    def run(self, query, target_language):
+        """
+        Execute the multilingual knowledge retrieval workflow.
+
+        Args:
+            query (str): User's query.
+            target_language (str): Target language for translation.
+
+        Returns:
+            str: Translated knowledge response generated by the LangSwarm agent, or None if no results are found.
+        """
+        # Retrieve documents
+        documents = self.retriever.query(query)
+
+        if not documents:
+            print("No multilingual documents retrieved.")
+            return None
+
+        # Translate the top document
+        top_document = documents[0]
+        try:
+            translated_text = self.translator.translate(top_document["text"], target_language)
+        except Exception as e:
+            print(f"Translation failed: {e}")
+            return None
+
+        # Concatenate input for the agent
+        agent_input = f"Query: {query}\nTranslated Context: {translated_text}"
+
+        # Generate and return response
+        return self.agent.generate_response(agent_input)
+
+
+# **Usage Example**
+
+if __name__ == "__main__":
+    # Example configuration and multilingual data
+    retriever_config = {"backend": "pinecone", "api_key": "your-api-key"}
+    translator_config = {"service": "google", "api_key": "translator-api-key"}
+    multilingual_data = [
+        {"text": "¿Qué es LangSwarm?", "language": "es"},
+        {"text": "LangSwarm nedir?", "language": "tr"},
+        {"text": "Qu'est-ce que LangSwarm ?", "language": "fr"},
+        {"text": "What is LangSwarm?", "language": "en"}
+    ]
+
+    # Initialize workflow
+    multilingual_knowledge = MultilingualKnowledgeWorkflow(retriever_config, translator_config, multilingual_data)
+
+    # User query
+    user_query = "What is LangSwarm?"
+    target_language = "fr"  # French
+
+    # Run the workflow
+    response = multilingual_knowledge.run(user_query, target_language)
+
+    if response:
+        print("Multilingual Knowledge Response:", response)
+    else:
+        print("No relevant response could be generated.")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/templates/research.py
+--------------------------------------------------------------------------------
+
+from langswarm.agent import LangSwarmAgent
+from retrievers import HybridRetriever  # Placeholder for your retriever implementation
+from rerankers import DomainSpecificReranker  # Placeholder for your reranker implementation
+
+class ResearchAssistantWorkflow:
+    """
+    Workflow for assisting researchers by retrieving and ranking academic papers or articles.
+
+    Specification:
+    - Initialize a LangSwarm agent.
+    - Set up a hybrid retriever and a domain-specific reranker.
+    - Fetch, process, and load research data into the retriever backend.
+    - Handle user queries and generate contextual responses.
+    - Implement fallback for cases where no documents are retrieved or reranked.
+    """
+
+    def __init__(self, retriever_config, reranker_config, research_data):
+        """
+        Initialize the research assistant workflow.
+
+        Args:
+            retriever_config (dict): Configuration for setting up the hybrid retriever.
+            reranker_config (dict): Configuration for the domain-specific reranker.
+            research_data (list): Data for populating the retriever backend.
+        """
+        # Initialize LangSwarm agent
+        self.agent = LangSwarmAgent()
+
+        # Initialize retriever and reranker
+        self.retriever = HybridRetriever(**retriever_config)
+        self.reranker = DomainSpecificReranker(**reranker_config)
+
+        # Data Fetch and Processing
+        self.processed_data = self.process_data(research_data)
+
+        # Data Load
+        self.load_data_to_retriever()
+
+    def process_data(self, raw_data):
+        """
+        Process the raw data into retriever-compatible formats.
+
+        Args:
+            raw_data (list): List of raw research data.
+
+        Returns:
+            list: Processed data ready for loading.
+        """
+        return [{"text": entry.strip(), "metadata": {"source": "research"}} for entry in raw_data]
+
+    def load_data_to_retriever(self):
+        """
+        Load the processed data into the retriever backend.
+        """
+        self.retriever.add_documents(self.processed_data)
+
+    def run(self, query):
+        """
+        Execute the research assistant workflow.
+
+        Args:
+            query (str): User's query.
+
+        Returns:
+            str: Response generated by the LangSwarm agent, or None if no results are found.
+        """
+        # Retrieve documents
+        documents = self.retriever.query(query)
+
+        if not documents:
+            print("No research documents retrieved.")
+            return None
+
+        # Rerank documents
+        reranked_documents = self.reranker.rerank(query, documents)
+
+        if not reranked_documents:
+            print("No documents could be reranked.")
+            return None
+
+        # Concatenate input for the agent
+        context = reranked_documents[0]["text"]
+        agent_input = f"Query: {query}\nContext: {context}"
+
+        # Generate and return response
+        return self.agent.generate_response(agent_input)
+
+
+# **Usage Example**
+
+if __name__ == "__main__":
+    # Example configuration and research data
+    retriever_config = {"backend": "faiss", "index_path": "research_index.faiss"}
+    reranker_config = {"model_name": "scibert"}  # Example domain-specific model
+    research_data = [
+        "Paper 1: LangSwarm's impact on multi-agent systems.",
+        "Paper 2: Applications of reinforcement learning in research.",
+        "Paper 3: Advances in large language models for scientific discovery."
+    ]
+
+    # Initialize workflow
+    research_assistant = ResearchAssistantWorkflow(retriever_config, reranker_config, research_data)
+
+    # User query
+    user_query = "What are the latest advancements in reinforcement learning?"
+
+    # Run the workflow
+    response = research_assistant.run(user_query)
+
+    if response:
+        print("Research Assistant Response:", response)
+    else:
+        print("No relevant response could be generated.")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/templates/knowledge_base.py
+--------------------------------------------------------------------------------
+
+from langswarm.agent import LangSwarmAgent
+from retrievers import HybridRetriever, SQLRetriever  # Placeholder for your retriever implementations
+from rerankers import CombinedReranker  # Placeholder for your reranker implementation
+
+class EnterpriseKnowledgeBaseWorkflow:
+    """
+    Workflow for retrieving and ranking information from an enterprise knowledge base.
+
+    Specification:
+    - Initialize a LangSwarm agent.
+    - Set up multiple retrievers and a combined reranker.
+    - Fetch, process, and load data into respective retriever backends.
+    - Handle user queries and generate contextual responses.
+    - Implement fallback for cases where no documents are retrieved or reranked.
+    """
+
+    def __init__(self, retriever_configs, reranker_config, data_sources):
+        """
+        Initialize the enterprise knowledge base workflow.
+
+        Args:
+            retriever_configs (list): List of configurations for each retriever.
+            reranker_config (dict): Configuration for the combined reranker.
+            data_sources (list): List of data sources (files or database connections).
+        """
+        # Initialize LangSwarm agent
+        self.agent = LangSwarmAgent()
+
+        # Initialize retrievers
+        self.retrievers = [HybridRetriever(**config) if config["type"] == "hybrid" else SQLRetriever(**config)
+                           for config in retriever_configs]
+
+        # Initialize reranker
+        self.reranker = CombinedReranker(**reranker_config)
+
+        # Data Fetch and Processing
+        self.data = self.fetch_data(data_sources)
+        self.processed_data = self.process_data(self.data)
+
+        # Data Load
+        self.load_data_to_retrievers(self.processed_data)
+
+    def fetch_data(self, data_sources):
+        """
+        Fetch data from various sources.
+
+        Args:
+            data_sources (list): List of file paths or database queries.
+
+        Returns:
+            dict: Raw data fetched from each source, keyed by retriever index.
+        """
+        raw_data = {}
+        for i, source in enumerate(data_sources):
+            if isinstance(source, str):  # File source
+                with open(source, 'r') as f:
+                    raw_data[i] = f.readlines()
+            elif callable(source):  # Database query function
+                raw_data[i] = source()  # Assume the function returns a list of records
+        return raw_data
+
+    def process_data(self, raw_data):
+        """
+        Process the raw data into retriever-compatible formats.
+
+        Args:
+            raw_data (dict): Raw data keyed by retriever index.
+
+        Returns:
+            dict: Processed data ready for loading, keyed by retriever index.
+        """
+        processed_data = {}
+        for idx, data in raw_data.items():
+            processed_data[idx] = [{"text": entry.strip(), "metadata": {}} for entry in data]
+        return processed_data
+
+    def load_data_to_retrievers(self, processed_data):
+        """
+        Load the processed data into respective retriever backends.
+
+        Args:
+            processed_data (dict): Processed data keyed by retriever index.
+        """
+        for idx, retriever in enumerate(self.retrievers):
+            retriever.add_documents(processed_data[idx])
+
+    def run(self, query):
+        """
+        Execute the knowledge base workflow.
+
+        Args:
+            query (str): User's query.
+
+        Returns:
+            str: Response generated by the LangSwarm agent, or None if no results are found.
+        """
+        # Retrieve documents from all sources
+        all_documents = []
+        for retriever in self.retrievers:
+            documents = retriever.query(query)
+            if not documents:
+                print(f"No documents retrieved from retriever {retriever}.")
+                continue
+            all_documents.extend(documents)
+
+        if not all_documents:
+            print("No documents retrieved from any source.")
+            return None
+
+        # Rerank documents
+        reranked_documents = self.reranker.rerank(query, all_documents)
+        if not reranked_documents:
+            print("No documents could be reranked.")
+            return None
+
+        # Concatenate input for the agent
+        context = reranked_documents[0]["text"]
+        agent_input = f"Query: {query}\nContext: {context}"
+
+        # Generate and return response
+        return self.agent.generate_response(agent_input)
+
+
+# **Usage Example**
+
+if __name__ == "__main__":
+    # Example configurations and data sources
+    retriever_configs = [
+        {"type": "hybrid", "backend": "pinecone", "api_key": "your-api-key"},
+        {"type": "sql", "connection_string": "sqlite:///enterprise_knowledge.db"}
+    ]
+    reranker_config = {"weights": [0.7, 0.3]}  # Example configuration for weighted reranking
+    data_sources = ["knowledge_base.txt", lambda: ["Record 1 from DB", "Record 2 from DB"]]
+
+    # Initialize workflow
+    knowledge_base = EnterpriseKnowledgeBaseWorkflow(retriever_configs, reranker_config, data_sources)
+
+    # User query
+    user_query = "What is our enterprise's vision?"
+
+    # Run the workflow
+    response = knowledge_base.run(user_query)
+
+    if response:
+        print("Knowledge Base Response:", response)
+    else:
+        print("No relevant response could be generated.")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/templates/temporal.py
+--------------------------------------------------------------------------------
+
+from langswarm.agent import LangSwarmAgent
+from retrievers import TemporalRetriever  # Placeholder for your retriever implementation
+
+class TemporalRetrievalWorkflow:
+    """
+    Workflow for retrieving documents based on temporal constraints.
+
+    Specification:
+    - Initialize a LangSwarm agent.
+    - Set up a temporal retriever.
+    - Fetch, process, and load temporally annotated data into the retriever backend.
+    - Handle user queries and apply temporal filters.
+    - Implement fallback for cases where no documents are retrieved or match temporal constraints.
+    """
+
+    def __init__(self, retriever_config, temporal_data):
+        """
+        Initialize the temporal retrieval workflow.
+
+        Args:
+            retriever_config (dict): Configuration for setting up the temporal retriever.
+            temporal_data (list): Data with temporal metadata for populating the retriever backend.
+        """
+        # Initialize LangSwarm agent
+        self.agent = LangSwarmAgent()
+
+        # Initialize retriever
+        self.retriever = TemporalRetriever(**retriever_config)
+
+        # Data Fetch and Processing
+        self.processed_data = self.process_data(temporal_data)
+
+        # Data Load
+        self.load_data_to_retriever()
+
+    def process_data(self, raw_data):
+        """
+        Process the raw data into retriever-compatible formats with temporal metadata.
+
+        Args:
+            raw_data (list): List of raw temporal data.
+
+        Returns:
+            list: Processed data ready for loading.
+        """
+        return [
+            {"text": entry["text"].strip(), "metadata": {"timestamp": entry["timestamp"]}}
+            for entry in raw_data
+        ]
+
+    def load_data_to_retriever(self):
+        """
+        Load the processed data into the retriever backend.
+        """
+        self.retriever.add_documents(self.processed_data)
+
+    def run(self, query, start_date, end_date):
+        """
+        Execute the temporal retrieval workflow.
+
+        Args:
+            query (str): User's query.
+            start_date (str): Start date for the temporal filter (ISO format).
+            end_date (str): End date for the temporal filter (ISO format).
+
+        Returns:
+            str: Response generated by the LangSwarm agent, or None if no results match the temporal filter.
+        """
+        # Retrieve documents
+        documents = self.retriever.query(query)
+
+        if not documents:
+            print("No documents retrieved.")
+            return None
+
+        # Apply temporal filter
+        filtered_documents = [
+            doc
+            for doc in documents
+            if start_date <= doc["metadata"]["timestamp"] <= end_date
+        ]
+
+        if not filtered_documents:
+            print("No documents match the temporal filter.")
+            return None
+
+        # Concatenate input for the agent
+        context = filtered_documents[0]["text"]
+        agent_input = f"Query: {query}\nContext: {context}"
+
+        # Generate and return response
+        return self.agent.generate_response(agent_input)
+
+
+# **Usage Example**
+
+if __name__ == "__main__":
+    # Example configuration and temporal data
+    retriever_config = {"backend": "faiss", "index_path": "temporal_index.faiss"}
+    temporal_data = [
+        {"text": "Event 1: LangSwarm release.", "timestamp": "2025-01-01"},
+        {"text": "Event 2: AI conference keynote.", "timestamp": "2025-02-15"},
+        {"text": "Event 3: Research breakthrough.", "timestamp": "2025-03-10"}
+    ]
+
+    # Initialize workflow
+    temporal_retrieval = TemporalRetrievalWorkflow(retriever_config, temporal_data)
+
+    # User query
+    user_query = "What events happened in early 2025?"
+    start_date = "2025-01-01"
+    end_date = "2025-02-28"
+
+    # Run the workflow
+    response = temporal_retrieval.run(user_query, start_date, end_date)
+
+    if response:
+        print("Temporal Retrieval Response:", response)
+    else:
+        print("No relevant response could be generated.")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/templates/recommender.py
+--------------------------------------------------------------------------------
+
+from langswarm.agent import LangSwarmAgent
+from retrievers import EmbeddingRetriever  # Placeholder for your retriever implementation
+from rerankers import CombinedReranker  # Placeholder for your reranker implementation
+
+class RecommendationSystemWorkflow:
+    """
+    Workflow for providing personalized recommendations based on user preferences.
+
+    Specification:
+    - Initialize a LangSwarm agent.
+    - Set up an embedding-based retriever and a combined reranker.
+    - Fetch, process, and load recommendation data into the retriever backend.
+    - Handle user queries and generate personalized recommendations.
+    - Implement fallback for cases where no documents are retrieved or reranked.
+    """
+
+    def __init__(self, retriever_config, reranker_config, item_data):
+        """
+        Initialize the recommendation system workflow.
+
+        Args:
+            retriever_config (dict): Configuration for setting up the embedding-based retriever.
+            reranker_config (dict): Configuration for the combined reranker.
+            item_data (list): Data for populating the retriever backend.
+        """
+        # Initialize LangSwarm agent
+        self.agent = LangSwarmAgent()
+
+        # Initialize retriever and reranker
+        self.retriever = EmbeddingRetriever(**retriever_config)
+        self.reranker = CombinedReranker(**reranker_config)
+
+        # Data Fetch and Processing
+        self.processed_data = self.process_data(item_data)
+
+        # Data Load
+        self.load_data_to_retriever()
+
+    def process_data(self, raw_data):
+        """
+        Process the raw data into retriever-compatible formats.
+
+        Args:
+            raw_data (list): List of raw item data.
+
+        Returns:
+            list: Processed data ready for loading.
+        """
+        return [{"text": entry.strip(), "metadata": {"type": "item"}} for entry in raw_data]
+
+    def load_data_to_retriever(self):
+        """
+        Load the processed data into the retriever backend.
+        """
+        self.retriever.add_documents(self.processed_data)
+
+    def run(self, user_profile):
+        """
+        Execute the recommendation workflow.
+
+        Args:
+            user_profile (str): User's preferences or query.
+
+        Returns:
+            str: Personalized recommendations generated by the LangSwarm agent, or None if no results are found.
+        """
+        # Retrieve similar items
+        documents = self.retriever.query(user_profile)
+
+        if not documents:
+            print("No recommendations retrieved.")
+            return None
+
+        # Rerank items
+        reranked_documents = self.reranker.rerank(user_profile, documents)
+
+        if not reranked_documents:
+            print("No recommendations could be reranked.")
+            return None
+
+        # Concatenate input for the agent
+        context = "\n".join([doc["text"] for doc in reranked_documents[:3]])  # Top 3 recommendations
+        agent_input = f"User Profile: {user_profile}\nRecommendations:\n{context}"
+
+        # Generate and return response
+        return self.agent.generate_response(agent_input)
+
+
+# **Usage Example**
+
+if __name__ == "__main__":
+    # Example configuration and item data
+    retriever_config = {"backend": "pinecone", "api_key": "your-api-key"}
+    reranker_config = {"weights": [0.8, 0.2]}  # Example weights for relevance and popularity
+    item_data = [
+        "Item 1: LangSwarm integration toolkit.",
+        "Item 2: Advanced AI solutions guide.",
+        "Item 3: Personalized recommendation strategies.",
+        "Item 4: Multi-agent system development resources."
+    ]
+
+    # Initialize workflow
+    recommendation_system = RecommendationSystemWorkflow(retriever_config, reranker_config, item_data)
+
+    # User preferences
+    user_profile = "Looking for tools to integrate AI and multi-agent systems."
+
+    # Run the workflow
+    response = recommendation_system.run(user_profile)
+
+    if response:
+        print("Personalized Recommendations:", response)
+    else:
+        print("No relevant recommendations could be generated.")
+
+
