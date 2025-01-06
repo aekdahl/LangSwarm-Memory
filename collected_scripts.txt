@@ -1,4 +1,4 @@
-# Total Document Length: 74214 characters
+# Total Document Length: 106832 characters
 
 
 --------------------------------------------------------------------------------
@@ -14,22 +14,86 @@ File: memory/memory_manager.py
 --------------------------------------------------------------------------------
 
 class MemoryManager:
-    def __init__(self, backend="langchain", **kwargs):
-        if backend == "langchain":
-            self.adapter = LangChainAdapter(**kwargs)
-        elif backend == "llama_index":
-            self.adapter = LlamaIndexAdapter(index_path=kwargs.get("index_path", "index.json"))
-        else:
-            raise ValueError("Unsupported backend")
+    def __init__(self, backends=None, **kwargs):
+        """
+        Initialize MemoryManager with multiple backends.
+
+        Args:
+            backends (list): List of backend configurations. Each entry can specify
+                            the backend type (e.g., "langchain", "llama_index") and
+                            corresponding parameters.
+        """
+        self.adapters = []
+        if backends:
+            for backend in backends:
+                if backend["type"] == "langchain":
+                    self.adapters.append(LangChainAdapter(**backend.get("params", {})))
+                elif backend["type"] == "llama_index":
+                    self.adapters.append(LlamaIndexAdapter(**backend.get("params", {})))
+                else:
+                    raise ValueError(f"Unsupported backend: {backend['type']}")
 
     def add_documents(self, documents):
-        self.adapter.add_documents(documents)
+        for adapter in self.adapters:
+            adapter.add_documents(documents)
 
     def query(self, query, filters=None):
-        return self.adapter.query(query, filters)
+        results = []
+        for adapter in self.adapters:
+            results.extend(adapter.query(query, filters))
+        return results
 
     def delete(self, document_ids):
-        self.adapter.delete(document_ids)
+        for adapter in self.adapters:
+            adapter.delete(document_ids)
+
+
+
+"""
+The SharedMemoryManager will unify and orchestrate memory backends, enabling seamless integration with the LangSwarm ecosystem. Its primary role is to handle shared memory operations across multiple backends and provide a consistent interface for:
+
+Centralized and Federated Memory: Supporting both centralized memory (e.g., for global indices) and federated memory (e.g., agent-specific memory).
+Thread-Safe Operations: Ensuring safe concurrent access to shared memory.
+Multi-Backend Orchestration: Allowing flexible switching and management of memory backends (e.g., FAISS, Pinecone, Elasticsearch).
+"""
+class SharedMemoryManager:
+    def __init__(self, backends, thread_safe=True):
+        """
+        Initializes the shared memory manager.
+        
+        Args:
+            backends (list): List of backend adapters to use.
+            thread_safe (bool): Whether to make the manager thread-safe.
+        """
+        self.backends = backends
+        self.lock = threading.RLock() if thread_safe else None
+
+    def _thread_safe(method):
+        """Decorator to add thread-safety to methods if enabled."""
+        def wrapper(self, *args, **kwargs):
+            if self.lock:
+                with self.lock:
+                    return method(self, *args, **kwargs)
+            return method(self, *args, **kwargs)
+        return wrapper
+
+    @_thread_safe
+    def add_documents(self, documents):
+        for backend in self.backends:
+            backend.add_documents(documents)
+
+    @_thread_safe
+    def query(self, query, top_k=5):
+        results = []
+        for backend in self.backends:
+            results.extend(backend.query(query, top_k))
+        return results
+
+    @_thread_safe
+    def delete(self, ids):
+        for backend in self.backends:
+            backend.delete(ids)
+
 
 
 
@@ -135,6 +199,184 @@ class CentralizedIndex:
 
         self.index = GPTSimpleVectorIndex(valid_documents)
         self.index.save_to_disk(self.index_path)
+
+
+
+--------------------------------------------------------------------------------
+File: memory/hybrid_centralized_index.py
+--------------------------------------------------------------------------------
+
+import importlib
+
+
+class HybridCentralizedIndex:
+    """
+    HybridCentralizedIndex manages multiple backends, enabling hybrid retrieval and indexing.
+    """
+
+    def __init__(self, config):
+        """
+        Initialize the hybrid index with the given configuration.
+        
+        Args:
+            config (dict): Configuration specifying backends and their settings.
+        """
+        self.config = config
+        self.backends = {}
+        self._check_dependencies()
+        self._initialize_backends()
+
+    def _check_dependencies(self):
+        """
+        Verify that required libraries for enabled backends are installed.
+        """
+        dependency_map = {
+            "faiss": "faiss",
+            "elasticsearch": "elasticsearch",
+            "pinecone": "pinecone-client",
+        }
+
+        for backend, library in dependency_map.items():
+            if self.config.get(backend, {}).get("enabled", False):
+                if not self._is_library_installed(library):
+                    raise ImportError(
+                        f"The library '{library}' is required for the '{backend}' backend "
+                        f"but is not installed. Please install it using `pip install {library}`."
+                    )
+
+    @staticmethod
+    def _is_library_installed(library):
+        """
+        Check if a library is installed.
+        
+        Args:
+            library (str): Name of the library to check.
+        
+        Returns:
+            bool: True if installed, False otherwise.
+        """
+        try:
+            importlib.import_module(library)
+            return True
+        except ImportError:
+            return False
+
+    def _initialize_backends(self):
+        """
+        Initialize the configured backends.
+        """
+        if self.config.get("faiss", {}).get("enabled", False):
+            self.backends["faiss"] = self._initialize_faiss()
+
+        if self.config.get("elasticsearch", {}).get("enabled", False):
+            self.backends["elasticsearch"] = self._initialize_elasticsearch()
+
+        if self.config.get("pinecone", {}).get("enabled", False):
+            self.backends["pinecone"] = self._initialize_pinecone()
+
+    def _initialize_faiss(self):
+        from faiss import IndexFlatL2
+        config = self.config["faiss"]
+        return IndexFlatL2(config["dimension"])
+
+    def _initialize_elasticsearch(self):
+        from elasticsearch import Elasticsearch
+        config = self.config["elasticsearch"]
+        return Elasticsearch([config["host"]])
+
+    def _initialize_pinecone(self):
+        import pinecone
+        config = self.config["pinecone"]
+        pinecone.init(api_key=config["api_key"], environment=config["environment"])
+        return pinecone.Index(config["index_name"])
+
+    def add_to_index(self, data, backend="faiss", **kwargs):
+        """
+        Add data to the specified backend.
+        
+        Args:
+            data (Any): Data to be indexed.
+            backend (str): Backend to use (default: 'faiss').
+            **kwargs: Additional arguments for backend-specific methods.
+        """
+        if backend not in self.backends:
+            raise ValueError(f"Backend '{backend}' is not initialized or supported.")
+        if backend == "faiss":
+            self.backends[backend].add(data)
+        elif backend == "elasticsearch":
+            self.backends[backend].index(index=self.config[backend]["index_name"], body=data)
+        elif backend == "pinecone":
+            self.backends[backend].upsert(data, **kwargs)
+
+    def query(self, query, backend="faiss", **kwargs):
+        """
+        Query the specified backend.
+        
+        Args:
+            query (str): Query string or vector.
+            backend (str): Backend to use (default: 'faiss').
+            **kwargs: Additional arguments for bac
+
+
+
+--------------------------------------------------------------------------------
+File: memory/wrappers/thread_safe_adapter.py
+--------------------------------------------------------------------------------
+
+import threading
+
+class ThreadSafeAdapter:
+    def __init__(self, adapter):
+        """
+        Wraps an existing adapter to make it thread-safe.
+
+        Args:
+            adapter: The adapter to wrap (e.g., FAISSBackend, PineconeBackend, etc.).
+        """
+        self.adapter = adapter
+        self.lock = threading.RLock()
+
+    def add_documents(self, documents):
+        """
+        Thread-safe method to add documents to the underlying adapter.
+
+        Args:
+            documents (list): List of documents to add.
+        """
+        with self.lock:
+            return self.adapter.add_documents(documents)
+
+    def query(self, query, top_k=5):
+        """
+        Thread-safe method to query the underlying adapter.
+
+        Args:
+            query (str): Query string.
+            top_k (int): Number of top results to retrieve.
+
+        Returns:
+            list: Query results.
+        """
+        with self.lock:
+            return self.adapter.query(query, top_k)
+
+    def delete(self, ids):
+        """
+        Thread-safe method to delete documents from the underlying adapter.
+
+        Args:
+            ids (list): List of document IDs to delete.
+        """
+        with self.lock:
+            return self.adapter.delete(ids)
+
+    def __getattr__(self, attr):
+        """
+        Delegate any other methods or attributes to the underlying adapter.
+        
+        This allows access to other methods (if needed) without redefining them.
+        """
+        return getattr(self.adapter, attr)
 
 
 
@@ -272,6 +514,90 @@ class HuggingFaceDPRReranker(BaseReranker):
 
 
 --------------------------------------------------------------------------------
+File: memory/rerankers/temporal_federated.py
+--------------------------------------------------------------------------------
+
+class TemporalRetriever:
+    """
+    Retrieve documents based on temporal constraints (e.g., by timestamps).
+    """
+    def __init__(self, retriever, timestamp_field):
+        """
+        Args:
+            retriever (object): Base retriever (e.g., dense, sparse).
+            timestamp_field (str): Field containing document timestamps.
+        """
+        self.retriever = retriever
+        self.timestamp_field = timestamp_field
+
+    def query(self, query, start_time=None, end_time=None):
+        """
+        Retrieve documents within a temporal range.
+
+        Args:
+            query (str): Query string.
+            start_time (str): Start time in ISO 8601 format.
+            end_time (str): End time in ISO 8601 format.
+
+        Returns:
+            list: Retrieved documents matching the temporal range.
+        """
+        all_results = self.retriever.query(query)
+        filtered_results = [
+            doc for doc in all_results
+            if self._is_within_range(doc[self.timestamp_field], start_time, end_time)
+        ]
+        return filtered_results
+
+    def _is_within_range(self, timestamp, start_time, end_time):
+        """Helper function to check if a timestamp is within a given range."""
+        if start_time and timestamp < start_time:
+            return False
+        if end_time and timestamp > end_time:
+            return False
+        return True
+
+
+class FederatedRetriever:
+    """
+    Retrieve documents from multiple retrievers (federated search).
+    """
+    def __init__(self, retrievers):
+        """
+        Args:
+            retrievers (list): List of retrievers to federate.
+        """
+        self.retrievers = retrievers
+
+    def query(self, query):
+        """
+        Federate queries across all retrievers.
+
+        Args:
+            query (str): Query string.
+
+        Returns:
+            list: Combined results from all retrievers.
+        """
+        results = []
+        for retriever in self.retrievers:
+            results.extend(retriever.query(query))
+        return self._deduplicate_results(results)
+
+    def _deduplicate_results(self, results):
+        """Remove duplicates based on document IDs."""
+        seen = set()
+        deduplicated = []
+        for result in results:
+            doc_id = result.get("id")
+            if doc_id not in seen:
+                seen.add(doc_id)
+                deduplicated.append(result)
+        return deduplicated
+
+
+
+--------------------------------------------------------------------------------
 File: memory/rerankers/langchain.py
 --------------------------------------------------------------------------------
 
@@ -345,6 +671,74 @@ class CombinedRerankingWorkflow:
         # Sort documents by combined scores
         combined_results = [{"text": doc, "score": score} for doc, score in scores.items()]
         return sorted(combined_results, key=lambda x: x["score"], reverse=True)
+
+
+class MultiAgentRerankingWorkflow:
+    """
+    Multi-agent reranking strategy that utilizes multiple agents to score and aggregate
+    reranking results for improved consensus-based reranking.
+
+    Attributes:
+        agents (list): A list of reranking agent instances.
+        aggregation_function (callable): A function to combine scores (default: weighted average).
+    """
+
+    def __init__(self, agents, aggregation_function=None):
+        """
+        Initialize the multi-agent reranking workflow.
+
+        Args:
+            agents (list): List of reranking agent instances (subclasses of BaseReranker).
+            aggregation_function (callable): Function to aggregate scores (default: weighted average).
+        """
+        self.agents = agents
+        self.aggregation_function = aggregation_function or self.default_aggregation_function
+
+    def default_aggregation_function(self, scores):
+        """
+        Default aggregation function (weighted average of scores).
+
+        Args:
+            scores (list): List of scores from all agents.
+
+        Returns:
+            float: Aggregated score.
+        """
+        total_weight = sum(weight for _, weight in scores)
+        return sum(score * weight for score, weight in scores) / total_weight
+
+    def run(self, query, documents):
+        """
+        Perform multi-agent reranking.
+
+        Args:
+            query (str): The query string.
+            documents (list): List of documents to rerank.
+
+        Returns:
+            list: Documents sorted by aggregated scores.
+        """
+        # Collect scores from all agents
+        scores = {doc["text"]: [] for doc in documents}
+
+        for agent in self.agents:
+            agent_ranking = agent.rerank(query, documents)
+            for idx, doc in enumerate(agent_ranking):
+                scores[doc["text"]].append((doc["score"], 1 / (idx + 1)))  # Weight based on rank
+
+        # Aggregate scores
+        aggregated_scores = {
+            doc: self.aggregation_function(scores[doc])
+            for doc in scores
+        }
+
+        # Sort documents by aggregated scores
+        sorted_documents = sorted(
+            [{"text": doc, "score": score} for doc, score in aggregated_scores.items()],
+            key=lambda x: x["score"],
+            reverse=True
+        )
+        return sorted_documents
 
 
 
@@ -479,6 +873,41 @@ class PineconeAdapter(DatabaseAdapter):
         for doc_id in document_ids:
             self.db.delete(doc_id)
 
+class PineconeAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if all(var is not None for var in (Pinecone, OpenAIEmbeddings)):
+            pinecone.init(api_key=kwargs["api_key"], environment=kwargs["environment"])
+            self.db = Pinecone(index_name=kwargs["index_name"], embedding_function=OpenAIEmbeddings())
+        else:
+            raise ValueError("Unsupported vector database. Make sure LangChain and Pinecone packages are installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def add_documents_with_metadata(self, documents, metadata):
+        self.db.add_texts(documents, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        return self.db.similarity_search(query, filter=filters)
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.db.delete(doc_id)
+
+    def delete_by_metadata(self, metadata_query):
+        results = self.db.similarity_search(query=None, filter=metadata_query, k=1000)
+        ids_to_delete = [doc["id"] for doc in results]
+        for doc_id in ids_to_delete:
+            self.db.delete(doc_id)
+
+
+
+
 
 class WeaviateAdapter(DatabaseAdapter):
     """
@@ -509,6 +938,38 @@ class WeaviateAdapter(DatabaseAdapter):
         # Not directly supported in LangChain's Weaviate implementation
         raise NotImplementedError("Document deletion is not yet supported in WeaviateAdapter.")
 
+class WeaviateAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if Weaviate:
+            self.db = Weaviate(client=kwargs["client"])
+        else:
+            raise ValueError("Weaviate package is not installed.")
+
+    def add_documents(self, documents):
+        for doc in documents:
+            self.db.add_text(doc["text"], metadata=doc.get("metadata", {}))
+
+    def add_documents_with_metadata(self, documents, metadata):
+        for doc, meta in zip(documents, metadata):
+            self.db.add_text(doc, metadata=meta)
+
+    def query(self, query, filters=None):
+        return self.db.query(query, filters=filters)
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        return self.db.query_by_metadata(metadata_query, top_k=top_k)
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.db.delete_by_id(doc_id)
+
+    def delete_by_metadata(self, metadata_query):
+        self.db.delete_by_metadata(metadata_query)
+
+
+
+
+
 
 class MilvusAdapter(DatabaseAdapter):
     def __init__(self, *args, **kwargs):
@@ -535,6 +996,37 @@ class MilvusAdapter(DatabaseAdapter):
     def delete(self, document_ids):
         # Not directly supported in LangChain's Milvus implementation
         raise NotImplementedError("Document deletion is not yet supported in MilvusAdapter.")
+
+class MilvusAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if Milvus:
+            self.db = Milvus(collection_name=kwargs["collection_name"])
+        else:
+            raise ValueError("Milvus package is not installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def add_documents_with_metadata(self, documents, metadata):
+        self.db.add_texts(documents, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        return self.db.similarity_search(query, filter=filters)
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        return self.db.query_by_metadata(metadata_query, top_k=top_k)
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.db.delete_by_id(doc_id)
+
+    def delete_by_metadata(self, metadata_query):
+        self.db.delete_by_metadata(metadata_query)
+
+
+
 
 
 class QdrantAdapter(DatabaseAdapter):
@@ -799,6 +1291,272 @@ class CrossDomainRetrievalWorkflow:
 
 
 --------------------------------------------------------------------------------
+File: memory/adapters/langswarm.py
+--------------------------------------------------------------------------------
+
+from langswarm.memory.adapters.database_adapter import DatabaseAdapter
+import sqlite3
+import redis
+from chromadb import Client
+from chromadb.config import Settings
+from google.cloud import storage
+
+
+class SQLiteAdapter(DatabaseAdapter):
+    def __init__(self, db_path="memory.db"):
+        self.db_path = db_path
+        self._initialize_db()
+
+    def _initialize_db(self):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    metadata TEXT
+                )
+                """
+            )
+            conn.commit()
+
+    def _get_connection(self):
+        return sqlite3.connect(self.db_path)
+
+    def add_documents(self, documents):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for doc in documents:
+                key = doc.get("key", "")
+                value = doc.get("text", "")
+                metadata = str(doc.get("metadata", {}))
+                cursor.execute(
+                    "INSERT OR REPLACE INTO memory (key, value, metadata) VALUES (?, ?, ?)",
+                    (key, value, metadata),
+                )
+            conn.commit()
+
+    def query(self, query, filters=None):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            sql_query = "SELECT key, value, metadata FROM memory WHERE value LIKE ?"
+            params = [f"%{query}%"]
+
+            if filters:
+                for field, value in filters.items():
+                    sql_query += f" AND metadata LIKE ?"
+                    params.append(f'%"{field}": "{value}"%')
+
+            cursor.execute(sql_query, params)
+            rows = cursor.fetchall()
+            return [
+                {"key": row[0], "text": row[1], "metadata": eval(row[2])} for row in rows
+            ]
+
+    def delete(self, document_ids):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for doc_id in document_ids:
+                cursor.execute("DELETE FROM memory WHERE key = ?", (doc_id,))
+            conn.commit()
+
+
+class RedisAdapter(DatabaseAdapter):
+    def __init__(self, redis_url="redis://localhost:6379/0"):
+        self.client = redis.StrictRedis.from_url(redis_url)
+
+    def add_documents(self, documents):
+        for doc in documents:
+            key = doc.get("key", "")
+            value = doc.get("text", "")
+            metadata = doc.get("metadata", {})
+            self.client.set(key, str({"value": value, "metadata": metadata}))
+
+    def query(self, query, filters=None):
+        keys = self.client.keys("*")
+        results = []
+        for key in keys:
+            entry = eval(self.client.get(key).decode())
+            if query.lower() in entry["value"].lower():
+                if filters and not all(
+                    entry["metadata"].get(k) == v for k, v in filters.items()
+                ):
+                    continue
+                results.append({"key": key.decode(), **entry})
+        return results
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.client.delete(doc_id)
+
+class RedisAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if Redis:
+            self.db = Redis(index_name=kwargs["index_name"], redis_url=kwargs["redis_url"])
+        else:
+            raise ValueError("Redis package is not installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def add_documents_with_metadata(self, documents, metadata):
+        self.db.add_texts(documents, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        return self.db.similarity_search(query, filter=filters)
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.db.delete(doc_id)
+
+    def delete_by_metadata(self, metadata_query):
+        self.db.delete(filter=metadata_query)
+
+
+
+
+
+class ChromaDBAdapter(DatabaseAdapter):
+    def __init__(self, collection_name="shared_memory", persist_directory=None):
+        self.client = Client(Settings(persist_directory=persist_directory))
+        self.collection = self.client.get_or_create_collection(name=collection_name)
+
+    def add_documents(self, documents):
+        for doc in documents:
+            key = doc.get("key", "")
+            value = doc.get("text", "")
+            metadata = doc.get("metadata", {})
+            self.collection.add(ids=[key], documents=[value], metadatas=[metadata])
+
+    def query(self, query, filters=None):
+        results = self.collection.query(query_text=query)
+        if filters:
+            return [
+                {
+                    "key": res["id"],
+                    "text": res["document"],
+                    "metadata": res["metadata"],
+                }
+                for res in results
+                if all(
+                    res["metadata"].get(k) == v for k, v in filters.items()
+                )
+            ]
+        return results
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.collection.delete(ids=[doc_id])
+
+class ChromaAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if Chroma:
+            self.db = Chroma(
+                collection_name=kwargs["collection_name"],
+                embedding_function=kwargs["embedding_function"],
+            )
+        else:
+            raise ValueError("Chroma package is not installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def add_documents_with_metadata(self, documents, metadata):
+        self.db.add_texts(documents, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        return self.db.similarity_search(query, filter=filters)
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.db.delete(doc_id)
+
+    def delete_by_metadata(self, metadata_query):
+        self.db.delete(filter=metadata_query)
+
+
+
+class GCSAdapter(DatabaseAdapter):
+    def __init__(self, bucket_name, prefix="shared_memory/"):
+        self.client = storage.Client()
+        self.bucket = self.client.bucket(bucket_name)
+        self.prefix = prefix
+
+    def add_documents(self, documents):
+        for doc in documents:
+            key = f"{self.prefix}{doc.get('key', '')}"
+            value = doc.get("text", "")
+            metadata = doc.get("metadata", {})
+            blob = self.bucket.blob(key)
+            blob.upload_from_string(str({"value": value, "metadata": metadata}))
+
+    def query(self, query, filters=None):
+        blobs = list(self.client.list_blobs(self.bucket, prefix=self.prefix))
+        results = []
+        for blob in blobs:
+            entry = eval(blob.download_as_text())
+            if query.lower() in entry["value"].lower():
+                if filters and not all(
+                    entry["metadata"].get(k) == v for k, v in filters.items()
+                ):
+                    continue
+                results.append({"key": blob.name[len(self.prefix):], **entry})
+        return results
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            blob = self.bucket.blob(f"{self.prefix}{doc_id}")
+            if blob.exists():
+                blob.delete()
+
+
+class ElasticsearchAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if Elasticsearch:
+            self.db = Elasticsearch(kwargs["connection_string"])
+        else:
+            raise ValueError("Elasticsearch package is not installed.")
+
+    def add_documents(self, documents):
+        for doc in documents:
+            self.db.index(index="documents", body={"text": doc["text"], "metadata": doc.get("metadata", {})})
+
+    def add_documents_with_metadata(self, documents, metadata):
+        for doc, meta in zip(documents, metadata):
+            self.db.index(index="documents", body={"text": doc, "metadata": meta})
+
+    def query(self, query, filters=None):
+        body = {"query": {"match": {"text": query}}}
+        if filters:
+            body["query"] = {"bool": {"must": [{"match": {"text": query}}], "filter": [{"term": filters}]}}
+        return self.db.search(index="documents", body=body)
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        body = {"query": {"bool": {"filter": [{"term": metadata_query}]}}}
+        return self.db.search(index="documents", body=body, size=top_k)
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.db.delete(index="documents", id=doc_id)
+
+    def delete_by_metadata(self, metadata_query):
+        body = {"query": {"bool": {"filter": [{"term": metadata_query}]}}}
+        self.db.delete_by_query(index="documents", body=body)
+
+
+
+--------------------------------------------------------------------------------
 File: memory/adapters/llamaindex.py
 --------------------------------------------------------------------------------
 
@@ -909,6 +1667,37 @@ class LlamaIndexWeaviateAdapter(LlamaIndexAdapter):
     def delete(self, document_ids):
         raise NotImplementedError("Document deletion is not yet supported for Weaviate.")
 
+class WeaviateAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if Weaviate:
+            self.db = Weaviate(client=kwargs["client"])
+        else:
+            raise ValueError("Weaviate package is not installed.")
+
+    def add_documents(self, documents):
+        for doc in documents:
+            self.db.add_text(doc["text"], metadata=doc.get("metadata", {}))
+
+    def add_documents_with_metadata(self, documents, metadata):
+        for doc, meta in zip(documents, metadata):
+            self.db.add_text(doc, metadata=meta)
+
+    def query(self, query, filters=None):
+        return self.db.query(query, filters=filters)
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        return self.db.query_by_metadata(metadata_query, top_k=top_k)
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.db.delete_by_id(doc_id)
+
+    def delete_by_metadata(self, metadata_query):
+        self.db.delete_by_metadata(metadata_query)
+
+
+
+
 
 try:
     from llama_index import FAISSIndex, Document
@@ -946,6 +1735,41 @@ class LlamaIndexFAISSAdapter(LlamaIndexAdapter):
 
     def delete(self, document_ids):
         raise NotImplementedError("Document deletion is not yet supported for FAISS.")
+
+class FAISSAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if FAISS:
+            self.db = FAISS.from_documents([], kwargs["embedding_function"])
+        else:
+            raise ValueError("FAISS package is not installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def add_documents_with_metadata(self, documents, metadata):
+        self.db.add_texts(documents, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        # FAISS does not natively support metadata filtering; mock functionality
+        results = self.db.similarity_search(query)
+        if filters:
+            return [doc for doc in results if all(doc["metadata"].get(k) == v for k, v in filters.items())]
+        return results
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        results = self.db.similarity_search(query=None, k=top_k)
+        return [doc for doc in results if all(doc["metadata"].get(k) == v for k, v in metadata_query.items())]
+
+    def delete(self, document_ids):
+        # FAISS does not support deletion by document ID
+        raise NotImplementedError("Deletion by document ID is not supported in FAISS.")
+
+    def delete_by_metadata(self, metadata_query):
+        # Mock functionality for metadata-based deletion
+        raise NotImplementedError("Deletion by metadata is not supported in FAISS.")
+
 
 
 try:
@@ -1105,6 +1929,62 @@ if __name__ == "__main__":
         print("Biomedical Search Response:", response)
     else:
         print("No relevant response could be generated.")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/templates/temporal_federated.py
+--------------------------------------------------------------------------------
+
+from memory.retrievers.temporal_federated import TemporalRetriever, FederatedRetriever
+
+class TemporalFederatedWorkflow:
+    """
+    Workflow combining temporal and federated retrieval.
+    """
+
+    def __init__(self, dense_config, sparse_config, timestamp_field, retriever_configs):
+        """
+        Initialize the workflow.
+
+        Args:
+            dense_config (dict): Configuration for dense retriever.
+            sparse_config (dict): Configuration for sparse retriever.
+            timestamp_field (str): Field with timestamps.
+            retriever_configs (list): List of federated retriever configs.
+        """
+        # Initialize temporal retrievers
+        self.dense_retriever = TemporalRetriever(**dense_config, timestamp_field=timestamp_field)
+        self.sparse_retriever = TemporalRetriever(**sparse_config, timestamp_field=timestamp_field)
+
+        # Initialize federated retriever
+        retrievers = [config["retriever"](**config["params"]) for config in retriever_configs]
+        self.federated_retriever = FederatedRetriever(retrievers)
+
+    def run(self, query, start_time=None, end_time=None):
+        """
+        Execute temporal and federated retrieval.
+
+        Args:
+            query (str): User query.
+            start_time (str): Start time.
+            end_time (str): End time.
+
+        Returns:
+            list: Retrieved documents.
+        """
+        # Perform temporal retrieval
+        dense_results = self.dense_retriever.query(query, start_time, end_time)
+        sparse_results = self.sparse_retriever.query(query, start_time, end_time)
+
+        # Combine temporal results
+        temporal_results = dense_results + sparse_results
+
+        # Perform federated retrieval
+        federated_results = self.federated_retriever.query(query)
+
+        # Merge all results
+        return temporal_results + federated_results
 
 
 
@@ -1755,6 +2635,90 @@ if __name__ == "__main__":
         print("Multilingual Knowledge Response:", response)
     else:
         print("No relevant response could be generated.")
+
+
+
+--------------------------------------------------------------------------------
+File: memory/templates/hybrid.py
+--------------------------------------------------------------------------------
+
+from langswarm.agent import LangSwarmAgent
+from retrievers import HybridRetriever, BM25Retriever  # Placeholder for retriever implementations
+from rerankers import CombinedRerankingWorkflow  # Placeholder for reranking workflow implementation
+
+class HybridRetrievalRerankingWorkflow:
+    """
+    Workflow for combining hybrid retrieval (dense + sparse) and reranking strategies.
+
+    Specification:
+    - Retrieve documents using both dense and sparse retrievers.
+    - Combine results and apply multi-agent reranking for improved ranking.
+    - Generate responses based on the top-ranked results.
+    """
+
+    def __init__(self, dense_config, sparse_config, reranker_configs, documents):
+        """
+        Initialize the workflow.
+
+        Args:
+            dense_config (dict): Configuration for the dense retriever.
+            sparse_config (dict): Configuration for the sparse retriever.
+            reranker_configs (list): List of reranker configurations.
+            documents (list): List of documents to populate retrievers.
+        """
+        # Initialize LangSwarm agent
+        self.agent = LangSwarmAgent()
+
+        # Initialize retrievers
+        self.dense_retriever = HybridRetriever(**dense_config)
+        self.sparse_retriever = BM25Retriever(documents, **sparse_config)
+
+        # Initialize reranking workflow
+        rerankers = [config["reranker"](**config["params"]) for config in reranker_configs]
+        self.reranker_workflow = CombinedRerankingWorkflow(rerankers)
+
+        # Data Load
+        self.load_data_to_dense_retriever(documents)
+
+    def load_data_to_dense_retriever(self, documents):
+        """
+        Load documents into the dense retriever backend.
+
+        Args:
+            documents (list): List of documents.
+        """
+        self.dense_retriever.add_documents(documents)
+
+    def run(self, query):
+        """
+        Execute the hybrid retrieval and reranking workflow.
+
+        Args:
+            query (str): User's query.
+
+        Returns:
+            str: Response generated by the LangSwarm agent, or None if no results are found.
+        """
+        # Retrieve using dense and sparse retrievers
+        dense_results = self.dense_retriever.query(query)
+        sparse_results = self.sparse_retriever.query(query)
+
+        # Combine results
+        combined_results = dense_results + sparse_results
+
+        # Rerank combined results
+        reranked_results = self.reranker_workflow.run(query, combined_results)
+
+        if not reranked_results:
+            print("No documents could be reranked.")
+            return None
+
+        # Concatenate input for the agent
+        context = reranked_results[0]["text"]
+        agent_input = f"Query: {query}\nContext: {context}"
+
+        # Generate and return response
+        return self.agent.generate_response(agent_input)
 
 
 
