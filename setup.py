@@ -7,7 +7,11 @@ with open("requirements.txt", "r") as f:
 setup(
     name="langswarm-memory",
     version="0.0.1",
-    description = "",
+    description = (
+        "LangSwarm-Memory: A versatile memory management framework for multi-agent systems, "
+        "supporting advanced retrieval, reranking workflows, and domain-specific templates "
+        "for autonomous AI solutions."
+    ),
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/aekdahl/langswarm-memory",
