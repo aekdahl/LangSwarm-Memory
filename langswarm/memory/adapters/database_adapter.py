@@ -71,6 +71,10 @@ class DatabaseAdapter(ABC):
         """
         pass
 
+    @abstractmethod
+    def capabilities(self) -> Dict[str, bool]:
+        raise NotImplementedError
+
 # Example implementation of the DatabaseAdapter
 class BaseExampleAdapter(DatabaseAdapter):
     """
