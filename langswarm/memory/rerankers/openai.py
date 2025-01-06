@@ -1,4 +1,4 @@
-import json
+from memory.rerankers.rerank import BaseReranker  # Import missing base class.
 
 class OpenAIReranker(BaseReranker):
     """
