@@ -1,3 +1,5 @@
+from .database_adapter import DatabaseAdapter
+
 try:
     from langchain.vectorstores import Pinecone
     from langchain.embeddings.openai import OpenAIEmbeddings
@@ -13,7 +15,7 @@ class PineconeAdapter(DatabaseAdapter):
             pinecone.init(api_key=kwargs["api_key"], environment=kwargs["environment"])
             self.db = Pinecone(index_name=kwargs["index_name"], embedding_function=OpenAIEmbeddings())
         else:
-            raise ValueError("Unsupported vector database for LangChain")
+            raise ValueError("Unsupported vector database. Make sure LangChain and Pinecone packages are installed.")
 
     def add_documents(self, documents):
         texts = [doc["text"] for doc in documents]
