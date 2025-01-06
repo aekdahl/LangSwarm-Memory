@@ -1,4 +1,4 @@
-# Total Document Length: 106832 characters
+# Total Document Length: 121054 characters
 
 
 --------------------------------------------------------------------------------
@@ -12,6 +12,8 @@ File: tests/__init__.py
 --------------------------------------------------------------------------------
 File: memory/memory_manager.py
 --------------------------------------------------------------------------------
+
+import functools
 
 class MemoryManager:
     def __init__(self, backends=None, **kwargs):
@@ -37,11 +39,36 @@ class MemoryManager:
         for adapter in self.adapters:
             adapter.add_documents(documents)
 
-    def query(self, query, filters=None):
+    def query(self, query, filters=None, sort_key=None, top_k=None):
+        """
+        Query all backends and aggregate results with deduplication and sorting.
+    
+        Args:
+            query (str): Query string.
+            filters (dict): Optional filters for querying.
+            sort_key (str): Optional key for sorting results.
+            top_k (int): Optional number of top results to return.
+    
+        Returns:
+            list: Deduplicated and sorted query results.
+        """
         results = []
         for adapter in self.adapters:
             results.extend(adapter.query(query, filters))
-        return results
+    
+        # Deduplicate results by text (or other unique key)
+        unique_results = {res["text"]: res for res in results}.values()
+    
+        # Sort results if a sort key is provided
+        if sort_key:
+            unique_results = sorted(unique_results, key=lambda x: x.get(sort_key), reverse=True)
+    
+        # Limit to top_k results if specified
+        if top_k:
+            unique_results = list(unique_results)[:top_k]
+    
+        return list(unique_results)
+
 
     def delete(self, document_ids):
         for adapter in self.adapters:
@@ -57,21 +84,57 @@ Thread-Safe Operations: Ensuring safe concurrent access to shared memory.
 Multi-Backend Orchestration: Allowing flexible switching and management of memory backends (e.g., FAISS, Pinecone, Elasticsearch).
 """
 class SharedMemoryManager:
-    def __init__(self, backends, thread_safe=True):
+    def __init__(self, backend_configs, thread_safe=True):
         """
         Initializes the shared memory manager.
-        
+
         Args:
-            backends (list): List of backend adapters to use.
+            backend_configs (list): List of backend configurations. Each entry specifies the backend type 
+                                    (e.g., "faiss", "pinecone") and its parameters.
             thread_safe (bool): Whether to make the manager thread-safe.
         """
-        self.backends = backends
+        self.backends = self._initialize_backends(backend_configs)
         self.lock = threading.RLock() if thread_safe else None
+
+    def _initialize_backends(self, backend_configs):
+        """
+        Initializes memory backends based on configurations.
+
+        Args:
+            backend_configs (list): List of configurations for each backend.
+
+        Returns:
+            list: List of initialized backend instances.
+        """
+        initialized_backends = []
+        for config in backend_configs:
+            if config["type"] == "faiss":
+                initialized_backends.append(FaissAdapter(**config.get("params", {})))
+            elif config["type"] == "pinecone":
+                initialized_backends.append(PineconeAdapter(**config.get("params", {})))
+            else:
+                raise ValueError(f"Unsupported backend type: {config['type']}")
+        return initialized_backends
+
+    def _example_usage(self):
+        """
+        Example usage of the SharedMemoryManager.
+        """
+        backend_configs = [
+            {"type": "faiss", "params": {"dimension": 128}},
+            {"type": "pinecone", "params": {"api_key": "your-api-key", "environment": "us-west1"}}
+        ]
+        manager = SharedMemoryManager(backend_configs)
+        documents = [{"text": "Document 1"}, {"text": "Document 2"}]
+        manager.add_documents(documents)
+        results = manager.query("query text")
+        print("Results:", results)
 
     def _thread_safe(method):
         """Decorator to add thread-safety to methods if enabled."""
+        @functools.wraps(method)
         def wrapper(self, *args, **kwargs):
-            if self.lock:
+            if hasattr(self, 'lock') and self.lock:  # Ensure instance has a lock attribute
                 with self.lock:
                     return method(self, *args, **kwargs)
             return method(self, *args, **kwargs)
@@ -83,10 +146,37 @@ class SharedMemoryManager:
             backend.add_documents(documents)
 
     @_thread_safe
-    def query(self, query, top_k=5):
+    def query(self, query_params, deduplicate=True, sort_key=None, sort_reverse=False):
+        """
+        Query shared memory segments for matching results.
+
+        Args:
+            query_params (dict): Parameters to filter the query.
+            deduplicate (bool): Whether to deduplicate results. Default is True.
+            sort_key (str): Key to sort results by (e.g., 'timestamp').
+            sort_reverse (bool): Whether to reverse the sorting order. Default is False.
+
+        Returns:
+            list: A list of query results.
+        """
         results = []
-        for backend in self.backends:
-            results.extend(backend.query(query, top_k))
+        
+        # Aggregate results from all shared memory segments
+        for segment in self._segments:
+            results.extend(segment.query(query_params))
+
+        # Deduplicate results if required
+        if deduplicate:
+            # Assuming each result is hashable (e.g., dictionaries with immutable keys/values)
+            results = list({frozenset(item.items()): item for item in results}.values())
+
+        # Sort results if a sort key is provided
+        if sort_key:
+            try:
+                results.sort(key=lambda x: x.get(sort_key), reverse=sort_reverse)
+            except KeyError:
+                raise ValueError(f"Sort key '{sort_key}' not found in results.")
+
         return results
 
     @_thread_safe
@@ -101,7 +191,9 @@ class SharedMemoryManager:
 File: memory/centralized_index.py
 --------------------------------------------------------------------------------
 
+import importlib
 from datetime import datetime, timedelta
+
 try:
     from llama_index import GPTSimpleVectorIndex, Document
     LLAMA_INDEX_AVAILABLE = True
@@ -139,55 +231,13 @@ class CentralizedIndex:
         """Check if indexing is available."""
         return self._indexing_is_available
 
-    def add_documents(self, docs):
+    def _clean_expired_documents(self):
         """
-        Add documents to the centralized index.
-
-        :param docs: List of documents with text and optional metadata.
-        """
-        if not self.indexing_is_available:
-            print("Indexing features are unavailable.")
-            return
-
-        documents = [
-            Document(text=doc["text"], metadata={
-                **doc.get("metadata", {}),
-                "timestamp": datetime.now().isoformat()  # Add a timestamp to each document
-            })
-            for doc in docs
-        ]
-        self.index.insert(documents)
-        self.index.save_to_disk(self.index_path)
-
-    def query(self, query_text, metadata_filter=None):
-        """
-        Query the index with optional metadata filtering.
-
-        :param query_text: The text query.
-        :param metadata_filter: Dictionary of metadata filters (optional).
-        :return: Filtered results based on the query and metadata.
-        """
-        if not self.indexing_is_available:
-            print("Indexing features are unavailable.")
-            return []
-
-        results = self.index.query(query_text)
-
-        # Apply metadata filtering if specified
-        if metadata_filter:
-            results = [
-                res for res in results
-                if all(res.extra_info.get(key) == value for key, value in metadata_filter.items())
-            ]
-        return results
-
-    def purge_expired_documents(self):
-        """
-        Remove documents from the index that have exceeded the expiration period.
+        Internal method to clean up expired documents.
         """
         if not self.indexing_is_available or self.expiration_days is None:
             return
-
+    
         now = datetime.now()
         valid_documents = []
         for doc in self.index.documents:
@@ -196,126 +246,137 @@ class CentralizedIndex:
                 doc_time = datetime.fromisoformat(timestamp)
                 if (now - doc_time) <= timedelta(days=self.expiration_days):
                     valid_documents.append(doc)
-
+    
+        # Update the index with valid documents only
         self.index = GPTSimpleVectorIndex(valid_documents)
         self.index.save_to_disk(self.index_path)
+    
+    def _validate_and_normalize_metadata(self, metadata):
+        """
+        Validates and normalizes metadata.
+    
+        Args:
+            metadata (dict): Metadata dictionary.
+    
+        Returns:
+            dict: Normalized metadata with lowercase keys.
+        """
+        if not isinstance(metadata, dict):
+            raise ValueError("Metadata must be a dictionary.")
+    
+        return {str(key).lower(): value for key, value in metadata.items()}
+    
+    def add_documents(self, docs):
+        """
+        Add documents to the centralized index with metadata validation.
+    
+        :param docs: List of documents with text and optional metadata.
+        """
+        if not self.indexing_is_available:
+            print("Indexing features are unavailable.")
+            return
+    
+        self._clean_expired_documents()
+    
+        documents = [
+            Document(text=doc["text"], metadata={
+                **self._validate_and_normalize_metadata(doc.get("metadata", {})),
+                "timestamp": datetime.now().isoformat()  # Add a timestamp to each document
+            })
+            for doc in docs
+        ]
+        self.index.insert(documents)
+        self.index.save_to_disk(self.index_path)
+    
+    def query(self, query_text, metadata_filter=None):
+        """
+        Query the index with metadata validation and filtering.
+    
+        :param query_text: The text query.
+        :param metadata_filter: Dictionary of metadata filters (optional).
+        :return: Filtered results based on the query and metadata.
+        """
+        self._clean_expired_documents()
+    
+        if not self.indexing_is_available:
+            print("Indexing features are unavailable.")
+            return []
+    
+        results = self.index.query(query_text)
+    
+        # Apply metadata filtering if specified
+        if metadata_filter:
+            normalized_filter = self._validate_and_normalize_metadata(metadata_filter)
+            results = [
+                res for res in results
+                if all(res.extra_info.get(key) == value for key, value in normalized_filter.items())
+            ]
+        return results
+
+
+    def purge_expired_documents(self):
+        """
+        Remove documents from the index that have exceeded the expiration period.
+        """
+        self._clean_expired_documents()
 
 
 
---------------------------------------------------------------------------------
-File: memory/hybrid_centralized_index.py
---------------------------------------------------------------------------------
-
-import importlib
 
 
 class HybridCentralizedIndex:
-    """
-    HybridCentralizedIndex manages multiple backends, enabling hybrid retrieval and indexing.
-    """
+    def __init__(self, adapters: List[Any] = None):
+        self.adapters = adapters or []
 
-    def __init__(self, config):
-        """
-        Initialize the hybrid index with the given configuration.
-        
-        Args:
-            config (dict): Configuration specifying backends and their settings.
-        """
-        self.config = config
-        self.backends = {}
-        self._check_dependencies()
-        self._initialize_backends()
+    def add_adapter(self, adapter: Any):
+        """Add a new adapter to the hybrid index."""
+        self.adapters.append(adapter)
 
-    def _check_dependencies(self):
-        """
-        Verify that required libraries for enabled backends are installed.
-        """
-        dependency_map = {
-            "faiss": "faiss",
-            "elasticsearch": "elasticsearch",
-            "pinecone": "pinecone-client",
-        }
+    def remove_adapter(self, adapter_name: str):
+        """Remove an adapter by name."""
+        self.adapters = [a for a in self.adapters if a.__class__.__name__ != adapter_name]
 
-        for backend, library in dependency_map.items():
-            if self.config.get(backend, {}).get("enabled", False):
-                if not self._is_library_installed(library):
-                    raise ImportError(
-                        f"The library '{library}' is required for the '{backend}' backend "
-                        f"but is not installed. Please install it using `pip install {library}`."
-                    )
+    def query(self, query: str, **kwargs) -> List[Dict[str, Any]]:
+        """Query all adapters that support the specified type."""
+        query_type = kwargs.get("type", "default")
+        results = []
 
-    @staticmethod
-    def _is_library_installed(library):
-        """
-        Check if a library is installed.
-        
-        Args:
-            library (str): Name of the library to check.
-        
-        Returns:
-            bool: True if installed, False otherwise.
-        """
-        try:
-            importlib.import_module(library)
-            return True
-        except ImportError:
-            return False
+        for adapter in self.adapters:
+            capabilities = adapter.capabilities()
+            if (query_type == "vector_search" and capabilities.get("vector_search")) or \
+               (query_type == "metadata_filtering" and capabilities.get("metadata_filtering")) or \
+               query_type == "default":
+                try:
+                    results.extend(adapter.query(query, **kwargs))
+                except Exception as e:
+                    print(f"Adapter {adapter.__class__.__name__} failed: {e}")
 
-    def _initialize_backends(self):
-        """
-        Initialize the configured backends.
-        """
-        if self.config.get("faiss", {}).get("enabled", False):
-            self.backends["faiss"] = self._initialize_faiss()
+        return self._deduplicate_and_sort(results)
 
-        if self.config.get("elasticsearch", {}).get("enabled", False):
-            self.backends["elasticsearch"] = self._initialize_elasticsearch()
+    def _deduplicate_and_sort(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Deduplicate and sort results by score."""
+        unique_results = {res["id"]: res for res in results}  # Deduplicate by ID
+        return sorted(unique_results.values(), key=lambda x: x["score"], reverse=True)
 
-        if self.config.get("pinecone", {}).get("enabled", False):
-            self.backends["pinecone"] = self._initialize_pinecone()
+"""
+# Example Usage
+if __name__ == "__main__":
+    # Initialize existing adapters
+    faiss_adapter = FAISSAdapter(index_path="path/to/faiss")
+    es_adapter = ElasticsearchAdapter(host="localhost", port=9200)
+    pinecone_adapter = PineconeAdapter(api_key="api_key", environment="us-west")
 
-    def _initialize_faiss(self):
-        from faiss import IndexFlatL2
-        config = self.config["faiss"]
-        return IndexFlatL2(config["dimension"])
+    # Initialize Hybrid Centralized Index
+    hybrid_index = HybridCentralizedIndex([faiss_adapter, es_adapter, pinecone_adapter])
 
-    def _initialize_elasticsearch(self):
-        from elasticsearch import Elasticsearch
-        config = self.config["elasticsearch"]
-        return Elasticsearch([config["host"]])
+    # Query for vector search
+    vector_results = hybrid_index.query("What is AI?", type="vector_search", top_k=5)
+    print("Vector Search Results:", vector_results)
 
-    def _initialize_pinecone(self):
-        import pinecone
-        config = self.config["pinecone"]
-        pinecone.init(api_key=config["api_key"], environment=config["environment"])
-        return pinecone.Index(config["index_name"])
-
-    def add_to_index(self, data, backend="faiss", **kwargs):
-        """
-        Add data to the specified backend.
-        
-        Args:
-            data (Any): Data to be indexed.
-            backend (str): Backend to use (default: 'faiss').
-            **kwargs: Additional arguments for backend-specific methods.
-        """
-        if backend not in self.backends:
-            raise ValueError(f"Backend '{backend}' is not initialized or supported.")
-        if backend == "faiss":
-            self.backends[backend].add(data)
-        elif backend == "elasticsearch":
-            self.backends[backend].index(index=self.config[backend]["index_name"], body=data)
-        elif backend == "pinecone":
-            self.backends[backend].upsert(data, **kwargs)
-
-    def query(self, query, backend="faiss", **kwargs):
-        """
-        Query the specified backend.
-        
-        Args:
-            query (str): Query string or vector.
-            backend (str): Backend to use (default: 'faiss').
-            **kwargs: Additional arguments for bac
+    # Query for metadata filtering
+    metadata_results = hybrid_index.query("What is AI?", type="metadata_filtering", metadata={"tag": "AI"})
+    print("Metadata Filtering Results:", metadata_results)
+"""
 
 
 
@@ -342,9 +403,21 @@ class ThreadSafeAdapter:
 
         Args:
             documents (list): List of documents to add.
+
+        Raises:
+            ValueError: If the input is not a list or documents lack required fields.
         """
+        if not isinstance(documents, list):
+            raise ValueError("Documents must be provided as a list.")
+        for doc in documents:
+            if not isinstance(doc, dict) or "text" not in doc:
+                raise ValueError("Each document must be a dictionary with at least a 'text' key.")
+
         with self.lock:
-            return self.adapter.add_documents(documents)
+            try:
+                self.adapter.add_documents(documents)
+            except Exception as e:
+                raise RuntimeError(f"Failed to add documents: {e}")
 
     def query(self, query, top_k=5):
         """
@@ -356,9 +429,21 @@ class ThreadSafeAdapter:
 
         Returns:
             list: Query results.
+
+        Raises:
+            ValueError: If query is not a string or top_k is not a positive integer.
+            RuntimeError: If querying the adapter fails.
         """
+        if not isinstance(query, str):
+            raise ValueError("Query must be a string.")
+        if not isinstance(top_k, int) or top_k <= 0:
+            raise ValueError("top_k must be a positive integer.")
+
         with self.lock:
-            return self.adapter.query(query, top_k)
+            try:
+                return self.adapter.query(query, top_k)
+            except Exception as e:
+                raise RuntimeError(f"Failed to query adapter: {e}")
 
     def delete(self, ids):
         """
@@ -366,17 +451,39 @@ class ThreadSafeAdapter:
 
         Args:
             ids (list): List of document IDs to delete.
+
+        Raises:
+            ValueError: If ids is not a list or is empty.
+            RuntimeError: If deletion fails.
         """
+        if not isinstance(ids, list) or not ids:
+            raise ValueError("IDs must be provided as a non-empty list.")
+
         with self.lock:
-            return self.adapter.delete(ids)
+            try:
+                self.adapter.delete(ids)
+            except Exception as e:
+                raise RuntimeError(f"Failed to delete documents: {e}")
 
     def __getattr__(self, attr):
         """
         Delegate any other methods or attributes to the underlying adapter.
-        
+
         This allows access to other methods (if needed) without redefining them.
+
+        Args:
+            attr (str): Attribute name.
+
+        Returns:
+            Any: The corresponding attribute from the adapter.
+
+        Raises:
+            AttributeError: If the attribute does not exist in the adapter.
         """
-        return getattr(self.adapter, attr)
+        try:
+            return getattr(self.adapter, attr)
+        except AttributeError as e:
+            raise AttributeError(f"Attribute '{attr}' not found in the underlying adapter: {e}")
 
 
 
@@ -402,18 +509,76 @@ File: memory/rerankers/hugging_face.py
 --------------------------------------------------------------------------------
 
 class HuggingFaceReranker(BaseReranker):
-    def __init__(self, model_name="all-MiniLM-L6-v2"):
+    """
+    Reranker using Hugging Face SentenceTransformer models for semantic similarity.
+
+    If the specified model is unavailable, a default model ('all-MiniLM-L6-v2') is used as a fallback.
+    """
+
+    DEFAULT_MODEL = "all-MiniLM-L6-v2"  # Default lightweight model for general-purpose reranking
+
+    def __init__(self, model_name=None):
+        """
+        Initialize the HuggingFaceReranker.
+
+        Args:
+            model_name (str): Name of the Hugging Face model to use. Defaults to `DEFAULT_MODEL`.
+        """
         from sentence_transformers import SentenceTransformer, util
-        self.model = SentenceTransformer(model_name)
+        self.util = util
+        self.model_name = model_name or self.DEFAULT_MODEL
+
+        try:
+            self.model = SentenceTransformer(self.model_name)
+        except Exception as e:
+            print(f"Error loading model '{self.model_name}': {e}")
+            print(f"Falling back to default model: '{self.DEFAULT_MODEL}'")
+            self.model = SentenceTransformer(self.DEFAULT_MODEL)
 
     def rerank(self, query, documents):
+        """
+        Rerank documents based on semantic similarity to the query.
+
+        Args:
+            query (str): The query string.
+            documents (list): List of documents with 'text' and optional 'metadata'.
+
+        Returns:
+            list: Documents sorted by relevance score.
+        """
+        # Validate inputs
+        if not isinstance(query, str):
+            raise ValueError("Query must be a string.")
+        if not isinstance(documents, list) or not all(isinstance(doc, dict) for doc in documents):
+            raise ValueError("Documents must be a list of dictionaries.")
+
         query_embedding = self.model.encode(query, convert_to_tensor=True)
         results = []
         for doc in documents:
-            doc_embedding = self.model.encode(doc['text'], convert_to_tensor=True)
-            score = util.pytorch_cos_sim(query_embedding, doc_embedding).item()
+            doc_embedding = self.model.encode(doc["text"], convert_to_tensor=True)
+            score = self.util.pytorch_cos_sim(query_embedding, doc_embedding).item()
             results.append({"text": doc["text"], "metadata": doc.get("metadata", {}), "score": score})
         return sorted(results, key=lambda x: x["score"], reverse=True)
+
+    @staticmethod
+    def validate_model(model_name):
+        """
+        Validate if the specified model is available for use.
+
+        Args:
+            model_name (str): Name of the Hugging Face model.
+
+        Returns:
+            bool: True if the model is available, False otherwise.
+        """
+        from sentence_transformers import SentenceTransformer
+        try:
+            SentenceTransformer(model_name)
+            return True
+        except Exception as e:
+            print(f"Validation failed for model '{model_name}': {e}")
+            return False
+
 
 
 class HuggingFaceSemanticReranker(BaseReranker):
@@ -746,20 +911,107 @@ class MultiAgentRerankingWorkflow:
 File: memory/rerankers/openai.py
 --------------------------------------------------------------------------------
 
+import json
+
 class OpenAIReranker(BaseReranker):
+    """
+    A reranker using OpenAI's language models for relevance ranking.
+
+    The reranker uses a structured JSON format for output, ensuring robustness and reliability.
+    """
+
     def __init__(self, model_name="gpt-4"):
+        """
+        Initialize the OpenAIReranker.
+
+        Args:
+            model_name (str): Name of the OpenAI model to use (e.g., "gpt-4").
+        """
         from langchain.llms import OpenAI
         self.llm = OpenAI(model_name=model_name)
 
     def rerank(self, query, documents):
-        prompt = f"Rerank the following documents based on their relevance to the query:\n\nQuery: {query}\n"
-        for idx, doc in enumerate(documents, 1):
-            prompt += f"{idx}. {doc['text']}\n"
-        prompt += "\nReturn the sorted order of document indices."
+        """
+        Rerank documents based on relevance to the query.
 
-        response = self.llm(prompt)
-        ranking = map(int, response.split())  # Extract indices
-        return [documents[i - 1] for i in ranking]
+        Args:
+            query (str): The query string.
+            documents (list): List of documents with 'text' and optional 'metadata'.
+
+        Returns:
+            list: Documents sorted by relevance score.
+        """
+        # Validate inputs
+        if not isinstance(query, str):
+            raise ValueError("Query must be a string.")
+        if not isinstance(documents, list) or not all(isinstance(doc, dict) for doc in documents):
+            raise ValueError("Documents must be a list of dictionaries.")
+
+        # Construct prompt
+        prompt = self._construct_prompt(query, documents)
+
+        # Generate response
+        try:
+            response = self.llm(prompt)
+            ranked_indices = self._parse_response(response, len(documents))
+        except Exception as e:
+            print(f"Error during reranking: {e}")
+            return []
+
+        # Map ranked indices back to documents
+        ranked_documents = [documents[i] for i in ranked_indices]
+        return ranked_documents
+
+    def _construct_prompt(self, query, documents):
+        """
+        Construct a structured prompt for the OpenAI model.
+
+        Args:
+            query (str): The query string.
+            documents (list): List of documents.
+
+        Returns:
+            str: The constructed prompt.
+        """
+        doc_list = "\n".join([f"{i + 1}. {doc['text']}" for i, doc in enumerate(documents)])
+        prompt = (
+            f"Rerank the following documents based on their relevance to the query.\n\n"
+            f"Query: {query}\n\nDocuments:\n{doc_list}\n\n"
+            f"Respond with a JSON array of indices in the order of relevance, e.g., [3, 1, 2]."
+        )
+        return prompt
+
+    def _parse_response(self, response, num_docs):
+        """
+        Parse and validate the response from the OpenAI model.
+
+        Args:
+            response (str): The raw response from the model.
+            num_docs (int): Number of documents in the input.
+
+        Returns:
+            list: List of ranked indices.
+
+        Raises:
+            ValueError: If the response is invalid or incomplete.
+        """
+        try:
+            # Parse JSON response
+            ranked_indices = json.loads(response)
+
+            # Validate the output format
+            if not isinstance(ranked_indices, list) or not all(
+                isinstance(idx, int) and 1 <= idx <= num_docs for idx in ranked_indices
+            ):
+                raise ValueError("Response does not contain a valid list of indices.")
+            if len(set(ranked_indices)) != num_docs:
+                raise ValueError("Response indices are incomplete or contain duplicates.")
+
+            # Convert to zero-based indexing
+            return [idx - 1 for idx in ranked_indices]
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(f"Invalid response format: {e}")
+
 
 
 
@@ -803,15 +1055,151 @@ class MetadataReranker(BaseReranker):
 File: memory/adapters/database_adapter.py
 --------------------------------------------------------------------------------
 
-class DatabaseAdapter:
-    def add_documents(self, documents):
-        raise NotImplementedError("Subclasses must implement add_documents()")
+from abc import ABC, abstractmethod
 
-    def query(self, query, filters=None):
-        raise NotImplementedError("Subclasses must implement query()")
+class DatabaseAdapter(ABC):
+    """
+    Abstract base class for database adapters.
 
-    def delete(self, document_ids):
-        raise NotImplementedError("Subclasses must implement delete()")
+    Defines the interface that all database adapters must implement.
+    """
+
+    @abstractmethod
+    def connect(self, config):
+        """
+        Establish a connection to the database.
+
+        Args:
+            config (dict): Configuration dictionary with required connection details.
+
+        Returns:
+            None
+
+        Raises:
+            ConnectionError: If the connection cannot be established.
+        """
+        pass
+
+    @abstractmethod
+    def insert(self, data):
+        """
+        Insert data into the database.
+
+        Args:
+            data (dict): The data to insert.
+
+        Returns:
+            bool: True if the operation was successful, False otherwise.
+
+        Raises:
+            ValueError: If data is invalid.
+        """
+        pass
+
+    @abstractmethod
+    def query(self, filters):
+        """
+        Query the database using the given filters.
+
+        Args:
+            filters (dict): A dictionary of query filters.
+
+        Returns:
+            list: A list of results matching the filters.
+
+        Raises:
+            ValueError: If filters are invalid.
+        """
+        pass
+
+    @abstractmethod
+    def delete(self, identifier):
+        """
+        Delete a record from the database.
+
+        Args:
+            identifier (str): The unique identifier of the record to delete.
+
+        Returns:
+            bool: True if the operation was successful, False otherwise.
+
+        Raises:
+            KeyError: If the identifier does not exist.
+        """
+        pass
+
+    @abstractmethod
+    def capabilities(self) -> Dict[str, bool]:
+        raise NotImplementedError
+
+# Example implementation of the DatabaseAdapter
+class BaseExampleAdapter(DatabaseAdapter):
+    """
+    Example implementation of the DatabaseAdapter for demonstration purposes.
+
+    This is a simple in-memory adapter that stores data in a Python dictionary.
+    """
+
+    def __init__(self):
+        self._storage = {}
+
+    def connect(self, config):
+        """
+        Simulate a connection to a database.
+
+        Args:
+            config (dict): Configuration dictionary (not used in this example).
+
+        Returns:
+            None
+        """
+        print("Connected to the in-memory database.")
+
+    def insert(self, data):
+        """
+        Insert data into the in-memory database.
+
+        Args:
+            data (dict): The data to insert.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
+        if 'id' not in data:
+            raise ValueError("Data must contain an 'id' field.")
+        self._storage[data['id']] = data
+        return True
+
+    def query(self, filters):
+        """
+        Query the in-memory database.
+
+        Args:
+            filters (dict): A dictionary of filters (e.g., {'field': 'value'}).
+
+        Returns:
+            list: A list of matching records.
+        """
+        results = []
+        for record in self._storage.values():
+            if all(record.get(k) == v for k, v in filters.items()):
+                results.append(record)
+        return results
+
+    def delete(self, identifier):
+        """
+        Delete a record from the in-memory database.
+
+        Args:
+            identifier (str): The unique identifier of the record.
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
+        if identifier not in self._storage:
+            raise KeyError(f"No record found with id '{identifier}'.")
+        del self._storage[identifier]
+        return True
 
 
 
@@ -852,26 +1240,18 @@ try:
 except ImportError:
     SQLite = None
 
+try:
+    from langchain.vectorstores import Redis
+    import redis
+except ImportError:
+    Redis = None
 
-class PineconeAdapter(DatabaseAdapter):
-    def __init__(self, *args, **kwargs):
-        if all(var is not None for var in (Pinecone, OpenAIEmbeddings)):
-            pinecone.init(api_key=kwargs["api_key"], environment=kwargs["environment"])
-            self.db = Pinecone(index_name=kwargs["index_name"], embedding_function=OpenAIEmbeddings())
-        else:
-            raise ValueError("Unsupported vector database. Make sure LangChain and Pinecone packages are installed.")
+try:
+    from langchain.vectorstores import Chroma
+    import chromadb
+except ImportError:
+    Chroma = None
 
-    def add_documents(self, documents):
-        texts = [doc["text"] for doc in documents]
-        metadata = [doc.get("metadata", {}) for doc in documents]
-        self.db.add_texts(texts, metadatas=metadata)
-
-    def query(self, query, filters=None):
-        return self.db.similarity_search(query, filter=filters)
-
-    def delete(self, document_ids):
-        for doc_id in document_ids:
-            self.db.delete(doc_id)
 
 class PineconeAdapter(DatabaseAdapter):
     def __init__(self, *args, **kwargs):
@@ -888,13 +1268,13 @@ class PineconeAdapter(DatabaseAdapter):
 
     def add_documents_with_metadata(self, documents, metadata):
         self.db.add_texts(documents, metadatas=metadata)
-
+        
     def query(self, query, filters=None):
         return self.db.similarity_search(query, filter=filters)
 
     def query_by_metadata(self, metadata_query, top_k=5):
         return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
-
+        
     def delete(self, document_ids):
         for doc_id in document_ids:
             self.db.delete(doc_id)
@@ -904,9 +1284,13 @@ class PineconeAdapter(DatabaseAdapter):
         ids_to_delete = [doc["id"] for doc in results]
         for doc_id in ids_to_delete:
             self.db.delete(doc_id)
-
-
-
+            
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,  # Pinecone supports vector-based similarity search.
+            "metadata_filtering": True,  # Metadata filtering is available.
+            "semantic_search": True,  # Embedding-based semantic search supported via OpenAIEmbeddings.
+        }
 
 
 class WeaviateAdapter(DatabaseAdapter):
@@ -931,44 +1315,34 @@ class WeaviateAdapter(DatabaseAdapter):
         metadata = [doc.get("metadata", {}) for doc in documents]
         self.db.add_texts(texts, metadatas=metadata)
 
-    def query(self, query, filters=None):
-        return self.db.similarity_search(query, filter=filters)
-
-    def delete(self, document_ids):
-        # Not directly supported in LangChain's Weaviate implementation
-        raise NotImplementedError("Document deletion is not yet supported in WeaviateAdapter.")
-
-class WeaviateAdapter(DatabaseAdapter):
-    def __init__(self, *args, **kwargs):
-        if Weaviate:
-            self.db = Weaviate(client=kwargs["client"])
-        else:
-            raise ValueError("Weaviate package is not installed.")
-
-    def add_documents(self, documents):
-        for doc in documents:
-            self.db.add_text(doc["text"], metadata=doc.get("metadata", {}))
-
     def add_documents_with_metadata(self, documents, metadata):
         for doc, meta in zip(documents, metadata):
             self.db.add_text(doc, metadata=meta)
 
     def query(self, query, filters=None):
-        return self.db.query(query, filters=filters)
+        return self.db.similarity_search(query, filter=filters)
+        # return self.db.query(query, filters=filters) <-- Should we use the simple query instead?        
 
     def query_by_metadata(self, metadata_query, top_k=5):
         return self.db.query_by_metadata(metadata_query, top_k=top_k)
 
     def delete(self, document_ids):
-        for doc_id in document_ids:
-            self.db.delete_by_id(doc_id)
+        try:
+            for doc_id in document_ids:
+                self.db.delete_by_id(doc_id)
+        except:
+            # Not directly supported in LangChain's Weaviate implementation
+            raise NotImplementedError("Document deletion is not yet supported in WeaviateAdapter.")
 
     def delete_by_metadata(self, metadata_query):
         self.db.delete_by_metadata(metadata_query)
 
-
-
-
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,  # Weaviate supports vector-based similarity search.
+            "metadata_filtering": True,  # Metadata filtering is available.
+            "semantic_search": True,  # Semantic search is supported with embeddings.
+        }
 
 
 class MilvusAdapter(DatabaseAdapter):
@@ -990,25 +1364,6 @@ class MilvusAdapter(DatabaseAdapter):
         metadata = [doc.get("metadata", {}) for doc in documents]
         self.db.add_texts(texts, metadatas=metadata)
 
-    def query(self, query, filters=None):
-        return self.db.similarity_search(query, filter=filters)
-
-    def delete(self, document_ids):
-        # Not directly supported in LangChain's Milvus implementation
-        raise NotImplementedError("Document deletion is not yet supported in MilvusAdapter.")
-
-class MilvusAdapter(DatabaseAdapter):
-    def __init__(self, *args, **kwargs):
-        if Milvus:
-            self.db = Milvus(collection_name=kwargs["collection_name"])
-        else:
-            raise ValueError("Milvus package is not installed.")
-
-    def add_documents(self, documents):
-        texts = [doc["text"] for doc in documents]
-        metadata = [doc.get("metadata", {}) for doc in documents]
-        self.db.add_texts(texts, metadatas=metadata)
-
     def add_documents_with_metadata(self, documents, metadata):
         self.db.add_texts(documents, metadatas=metadata)
 
@@ -1019,14 +1374,22 @@ class MilvusAdapter(DatabaseAdapter):
         return self.db.query_by_metadata(metadata_query, top_k=top_k)
 
     def delete(self, document_ids):
-        for doc_id in document_ids:
-            self.db.delete_by_id(doc_id)
+        try:
+            for doc_id in document_ids:
+                self.db.delete_by_id(doc_id)
+        except:
+            # Not directly supported in LangChain's Milvus implementation
+            raise NotImplementedError("Document deletion is not yet supported in MilvusAdapter.")
 
     def delete_by_metadata(self, metadata_query):
         self.db.delete_by_metadata(metadata_query)
 
-
-
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,  # Milvus supports vector-based similarity search.
+            "metadata_filtering": True,  # Metadata filtering is available.
+            "semantic_search": True,  # Semantic search is supported with embeddings.
+        }
 
 
 class QdrantAdapter(DatabaseAdapter):
@@ -1052,6 +1415,13 @@ class QdrantAdapter(DatabaseAdapter):
     def delete(self, document_ids):
         self.db.delete(ids=document_ids)
 
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,  # Qdrant supports vector-based similarity search.
+            "metadata_filtering": True,  # Metadata filtering is available.
+            "semantic_search": True,  # Embedding-based semantic search supported.
+        }
+
 
 class SQLiteAdapter(DatabaseAdapter):
     def __init__(self, *args, **kwargs):
@@ -1074,6 +1444,74 @@ class SQLiteAdapter(DatabaseAdapter):
 
     def delete(self, document_ids):
         self.db.delete(ids=document_ids)
+
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,  # LangChain's SQLite integration supports vector-based search.
+            "metadata_filtering": True,  # Metadata filtering is implemented via SQL queries.
+            "semantic_search": True,  # Embedding-based semantic search supported.
+        }
+
+
+class RedisAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if Redis:
+            self.db = Redis(index_name=kwargs["index_name"], redis_url=kwargs["redis_url"])
+        else:
+            raise ValueError("Redis package is not installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def add_documents_with_metadata(self, documents, metadata):
+        self.db.add_texts(documents, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        return self.db.similarity_search(query, filter=filters)
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.db.delete(doc_id)
+
+    def delete_by_metadata(self, metadata_query):
+        self.db.delete(filter=metadata_query)
+
+
+class ChromaAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if Chroma:
+            self.db = Chroma(
+                collection_name=kwargs["collection_name"],
+                embedding_function=kwargs["embedding_function"],
+            )
+        else:
+            raise ValueError("Chroma package is not installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def add_documents_with_metadata(self, documents, metadata):
+        self.db.add_texts(documents, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        return self.db.similarity_search(query, filter=filters)
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
+
+    def delete(self, document_ids):
+        for doc_id in document_ids:
+            self.db.delete(doc_id)
+
+    def delete_by_metadata(self, metadata_query):
+        self.db.delete(filter=metadata_query)
 
 
 
@@ -1294,16 +1732,41 @@ class CrossDomainRetrievalWorkflow:
 File: memory/adapters/langswarm.py
 --------------------------------------------------------------------------------
 
+from typing import Dict  # For typing annotations
 from langswarm.memory.adapters.database_adapter import DatabaseAdapter
-import sqlite3
-import redis
-from chromadb import Client
-from chromadb.config import Settings
-from google.cloud import storage
+
+try:
+    import sqlite3
+except ImportError:
+    sqlite3 = None
+
+try:
+    import redis
+except ImportError:
+    redis = None
+
+try:
+    from chromadb import Client as ChromaDB
+    from chromadb.config import Settings
+except ImportError:
+    ChromaDB = None
+
+try:
+    from google.cloud import storage
+except ImportError:
+    storage = None
+
+try:
+    from elasticsearch import Elasticsearch
+except ImportError:
+    storage = None
 
 
 class SQLiteAdapter(DatabaseAdapter):
     def __init__(self, db_path="memory.db"):
+        if any(var is None for var in (sqlite3)):
+            raise ValueError("Unsupported database. Make sure sqlite3 is installed.")
+            
         self.db_path = db_path
         self._initialize_db()
 
@@ -1361,9 +1824,19 @@ class SQLiteAdapter(DatabaseAdapter):
                 cursor.execute("DELETE FROM memory WHERE key = ?", (doc_id,))
             conn.commit()
 
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": False,  # SQLite does not support vector-based search.
+            "metadata_filtering": True,  # Supports metadata filtering through SQL queries.
+            "semantic_search": False,  # Requires external embeddings for semantic capabilities.
+        }
+
 
 class RedisAdapter(DatabaseAdapter):
     def __init__(self, redis_url="redis://localhost:6379/0"):
+        if any(var is None for var in (redis)):
+            raise ValueError("Unsupported database. Make sure sqlite3 is installed.")
+            
         self.client = redis.StrictRedis.from_url(redis_url)
 
     def add_documents(self, documents):
@@ -1390,41 +1863,20 @@ class RedisAdapter(DatabaseAdapter):
         for doc_id in document_ids:
             self.client.delete(doc_id)
 
-class RedisAdapter(DatabaseAdapter):
-    def __init__(self, *args, **kwargs):
-        if Redis:
-            self.db = Redis(index_name=kwargs["index_name"], redis_url=kwargs["redis_url"])
-        else:
-            raise ValueError("Redis package is not installed.")
-
-    def add_documents(self, documents):
-        texts = [doc["text"] for doc in documents]
-        metadata = [doc.get("metadata", {}) for doc in documents]
-        self.db.add_texts(texts, metadatas=metadata)
-
-    def add_documents_with_metadata(self, documents, metadata):
-        self.db.add_texts(documents, metadatas=metadata)
-
-    def query(self, query, filters=None):
-        return self.db.similarity_search(query, filter=filters)
-
-    def query_by_metadata(self, metadata_query, top_k=5):
-        return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
-
-    def delete(self, document_ids):
-        for doc_id in document_ids:
-            self.db.delete(doc_id)
-
-    def delete_by_metadata(self, metadata_query):
-        self.db.delete(filter=metadata_query)
-
-
-
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": False,  # Redis requires vector extensions like RediSearch for this.
+            "metadata_filtering": True,  # Supports metadata-based filtering if implemented.
+            "semantic_search": False,  # No built-in semantic search support.
+        }
 
 
 class ChromaDBAdapter(DatabaseAdapter):
     def __init__(self, collection_name="shared_memory", persist_directory=None):
-        self.client = Client(Settings(persist_directory=persist_directory))
+        if any(var is None for var in (ChromaDB)):
+            raise ValueError("Unsupported database. Make sure ChromaDB is installed.")
+            
+        self.client = ChromaDB(Settings(persist_directory=persist_directory))
         self.collection = self.client.get_or_create_collection(name=collection_name)
 
     def add_documents(self, documents):
@@ -1454,41 +1906,19 @@ class ChromaDBAdapter(DatabaseAdapter):
         for doc_id in document_ids:
             self.collection.delete(ids=[doc_id])
 
-class ChromaAdapter(DatabaseAdapter):
-    def __init__(self, *args, **kwargs):
-        if Chroma:
-            self.db = Chroma(
-                collection_name=kwargs["collection_name"],
-                embedding_function=kwargs["embedding_function"],
-            )
-        else:
-            raise ValueError("Chroma package is not installed.")
-
-    def add_documents(self, documents):
-        texts = [doc["text"] for doc in documents]
-        metadata = [doc.get("metadata", {}) for doc in documents]
-        self.db.add_texts(texts, metadatas=metadata)
-
-    def add_documents_with_metadata(self, documents, metadata):
-        self.db.add_texts(documents, metadatas=metadata)
-
-    def query(self, query, filters=None):
-        return self.db.similarity_search(query, filter=filters)
-
-    def query_by_metadata(self, metadata_query, top_k=5):
-        return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
-
-    def delete(self, document_ids):
-        for doc_id in document_ids:
-            self.db.delete(doc_id)
-
-    def delete_by_metadata(self, metadata_query):
-        self.db.delete(filter=metadata_query)
-
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,  # Chroma supports vector-based search.
+            "metadata_filtering": True,  # Metadata filtering is a core feature.
+            "semantic_search": True,  # Supports embeddings for semantic search.
+        }
 
 
 class GCSAdapter(DatabaseAdapter):
     def __init__(self, bucket_name, prefix="shared_memory/"):
+        if any(var is None for var in (storage)):
+            raise ValueError("Unsupported database. Make sure google cloud storage is installed.")
+            
         self.client = storage.Client()
         self.bucket = self.client.bucket(bucket_name)
         self.prefix = prefix
@@ -1519,6 +1949,13 @@ class GCSAdapter(DatabaseAdapter):
             blob = self.bucket.blob(f"{self.prefix}{doc_id}")
             if blob.exists():
                 blob.delete()
+
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": False,  # GCS is a storage solution, not a vector database.
+            "metadata_filtering": True,  # Metadata filtering implemented via stored metadata.
+            "semantic_search": False,  # Semantic capabilities not supported natively.
+        }
 
 
 class ElasticsearchAdapter(DatabaseAdapter):
@@ -1554,6 +1991,13 @@ class ElasticsearchAdapter(DatabaseAdapter):
         body = {"query": {"bool": {"filter": [{"term": metadata_query}]}}}
         self.db.delete_by_query(index="documents", body=body)
 
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,  # Elasticsearch supports vector search with extensions like dense_vector.
+            "metadata_filtering": True,  # Strong metadata filtering capabilities.
+            "semantic_search": True,  # Can be configured for semantic search using embeddings.
+        }
+
 
 
 --------------------------------------------------------------------------------
@@ -1563,12 +2007,40 @@ File: memory/adapters/llamaindex.py
 from .database_adapter import DatabaseAdapter
 
 try:
-    from llama_index import GPTSimpleVectorIndex, Document
+    from llama_index import Document
+except ImportError:
+    Document = None
+    
+try:
+    from llama_index import GPTSimpleVectorIndex
 except ImportError:
     GPTSimpleVectorIndex = None
-    Document = None
 
-class LoadFromDiskAdapter(DatabaseAdapter):
+try:
+    import pinecone
+    from llama_index import PineconeIndex
+except ImportError:
+    pinecone = None
+    PineconeIndex = None
+
+try:
+    from llama_index import WeaviateIndex
+except ImportError:
+    WeaviateIndex = None
+
+try:
+    from llama_index import FAISSIndex
+except ImportError:
+    FAISSIndex = None
+
+try:
+    from llama_index import SQLDatabase, SQLIndex
+except ImportError:
+    SQLDatabase = None
+    SQLIndex = None
+
+
+class LlamaIndexDiskAdapter(DatabaseAdapter):
     def __init__(self, index_path="index.json"):
         if all(var is not None for var in (GPTSimpleVectorIndex, Document)):
             try:
@@ -1592,13 +2064,13 @@ class LoadFromDiskAdapter(DatabaseAdapter):
     def delete(self, document_ids):
         raise NotImplementedError("Delete functionality not implemented for LlamaIndex")
 
-try:
-    import pinecone
-    from llama_index import PineconeIndex, Document
-except ImportError:
-    pinecone = None
-    PineconeIndex = None
-    Document = None
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,
+            "metadata_filtering": True,
+            "semantic_search": True,
+        }
+
 
 class LlamaIndexPineconeAdapter(LlamaIndexAdapter):
     """
@@ -1633,12 +2105,13 @@ class LlamaIndexPineconeAdapter(LlamaIndexAdapter):
     def delete(self, document_ids):
         self.index.delete(document_ids)
 
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,
+            "metadata_filtering": True,
+            "semantic_search": True,
+        }
 
-try:
-    from llama_index import WeaviateIndex, Document
-except ImportError:
-    WeaviateIndex = None
-    Document = None
 
 class LlamaIndexWeaviateAdapter(LlamaIndexAdapter):
     """
@@ -1667,43 +2140,13 @@ class LlamaIndexWeaviateAdapter(LlamaIndexAdapter):
     def delete(self, document_ids):
         raise NotImplementedError("Document deletion is not yet supported for Weaviate.")
 
-class WeaviateAdapter(DatabaseAdapter):
-    def __init__(self, *args, **kwargs):
-        if Weaviate:
-            self.db = Weaviate(client=kwargs["client"])
-        else:
-            raise ValueError("Weaviate package is not installed.")
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,
+            "metadata_filtering": True,
+            "semantic_search": True,
+        }
 
-    def add_documents(self, documents):
-        for doc in documents:
-            self.db.add_text(doc["text"], metadata=doc.get("metadata", {}))
-
-    def add_documents_with_metadata(self, documents, metadata):
-        for doc, meta in zip(documents, metadata):
-            self.db.add_text(doc, metadata=meta)
-
-    def query(self, query, filters=None):
-        return self.db.query(query, filters=filters)
-
-    def query_by_metadata(self, metadata_query, top_k=5):
-        return self.db.query_by_metadata(metadata_query, top_k=top_k)
-
-    def delete(self, document_ids):
-        for doc_id in document_ids:
-            self.db.delete_by_id(doc_id)
-
-    def delete_by_metadata(self, metadata_query):
-        self.db.delete_by_metadata(metadata_query)
-
-
-
-
-
-try:
-    from llama_index import FAISSIndex, Document
-except ImportError:
-    FAISSIndex = None
-    Document = None
 
 class LlamaIndexFAISSAdapter(LlamaIndexAdapter):
     """
@@ -1736,47 +2179,13 @@ class LlamaIndexFAISSAdapter(LlamaIndexAdapter):
     def delete(self, document_ids):
         raise NotImplementedError("Document deletion is not yet supported for FAISS.")
 
-class FAISSAdapter(DatabaseAdapter):
-    def __init__(self, *args, **kwargs):
-        if FAISS:
-            self.db = FAISS.from_documents([], kwargs["embedding_function"])
-        else:
-            raise ValueError("FAISS package is not installed.")
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": True,
+            "metadata_filtering": False,  # FAISS lacks native metadata filtering.
+            "semantic_search": True,
+        }
 
-    def add_documents(self, documents):
-        texts = [doc["text"] for doc in documents]
-        metadata = [doc.get("metadata", {}) for doc in documents]
-        self.db.add_texts(texts, metadatas=metadata)
-
-    def add_documents_with_metadata(self, documents, metadata):
-        self.db.add_texts(documents, metadatas=metadata)
-
-    def query(self, query, filters=None):
-        # FAISS does not natively support metadata filtering; mock functionality
-        results = self.db.similarity_search(query)
-        if filters:
-            return [doc for doc in results if all(doc["metadata"].get(k) == v for k, v in filters.items())]
-        return results
-
-    def query_by_metadata(self, metadata_query, top_k=5):
-        results = self.db.similarity_search(query=None, k=top_k)
-        return [doc for doc in results if all(doc["metadata"].get(k) == v for k, v in metadata_query.items())]
-
-    def delete(self, document_ids):
-        # FAISS does not support deletion by document ID
-        raise NotImplementedError("Deletion by document ID is not supported in FAISS.")
-
-    def delete_by_metadata(self, metadata_query):
-        # Mock functionality for metadata-based deletion
-        raise NotImplementedError("Deletion by metadata is not supported in FAISS.")
-
-
-
-try:
-    from llama_index import SQLDatabase, SQLIndex
-except ImportError:
-    SQLDatabase = None
-    SQLIndex = None
 
 class LlamaIndexSQLAdapter(LlamaIndexAdapter):
     """
@@ -1809,6 +2218,13 @@ class LlamaIndexSQLAdapter(LlamaIndexAdapter):
 
     def delete(self, document_ids):
         raise NotImplementedError("Document deletion is not yet supported for SQL.")
+
+    def capabilities(self) -> Dict[str, bool]:
+        return {
+            "vector_search": False,
+            "metadata_filtering": True,
+            "semantic_search": False,
+        }
 
 
 
