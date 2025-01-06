@@ -143,6 +143,41 @@ class LlamaIndexFAISSAdapter(LlamaIndexAdapter):
     def delete(self, document_ids):
         raise NotImplementedError("Document deletion is not yet supported for FAISS.")
 
+class FAISSAdapter(DatabaseAdapter):
+    def __init__(self, *args, **kwargs):
+        if FAISS:
+            self.db = FAISS.from_documents([], kwargs["embedding_function"])
+        else:
+            raise ValueError("FAISS package is not installed.")
+
+    def add_documents(self, documents):
+        texts = [doc["text"] for doc in documents]
+        metadata = [doc.get("metadata", {}) for doc in documents]
+        self.db.add_texts(texts, metadatas=metadata)
+
+    def add_documents_with_metadata(self, documents, metadata):
+        self.db.add_texts(documents, metadatas=metadata)
+
+    def query(self, query, filters=None):
+        # FAISS does not natively support metadata filtering; mock functionality
+        results = self.db.similarity_search(query)
+        if filters:
+            return [doc for doc in results if all(doc["metadata"].get(k) == v for k, v in filters.items())]
+        return results
+
+    def query_by_metadata(self, metadata_query, top_k=5):
+        results = self.db.similarity_search(query=None, k=top_k)
+        return [doc for doc in results if all(doc["metadata"].get(k) == v for k, v in metadata_query.items())]
+
+    def delete(self, document_ids):
+        # FAISS does not support deletion by document ID
+        raise NotImplementedError("Deletion by document ID is not supported in FAISS.")
+
+    def delete_by_metadata(self, metadata_query):
+        # Mock functionality for metadata-based deletion
+        raise NotImplementedError("Deletion by metadata is not supported in FAISS.")
+
+
 
 try:
     from llama_index import SQLDatabase, SQLIndex
