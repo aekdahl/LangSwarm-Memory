@@ -1,16 +1,74 @@
 class HuggingFaceReranker(BaseReranker):
-    def __init__(self, model_name="all-MiniLM-L6-v2"):
+    """
+    Reranker using Hugging Face SentenceTransformer models for semantic similarity.
+
+    If the specified model is unavailable, a default model ('all-MiniLM-L6-v2') is used as a fallback.
+    """
+
+    DEFAULT_MODEL = "all-MiniLM-L6-v2"  # Default lightweight model for general-purpose reranking
+
+    def __init__(self, model_name=None):
+        """
+        Initialize the HuggingFaceReranker.
+
+        Args:
+            model_name (str): Name of the Hugging Face model to use. Defaults to `DEFAULT_MODEL`.
+        """
         from sentence_transformers import SentenceTransformer, util
-        self.model = SentenceTransformer(model_name)
+        self.util = util
+        self.model_name = model_name or self.DEFAULT_MODEL
+
+        try:
+            self.model = SentenceTransformer(self.model_name)
+        except Exception as e:
+            print(f"Error loading model '{self.model_name}': {e}")
+            print(f"Falling back to default model: '{self.DEFAULT_MODEL}'")
+            self.model = SentenceTransformer(self.DEFAULT_MODEL)
 
     def rerank(self, query, documents):
+        """
+        Rerank documents based on semantic similarity to the query.
+
+        Args:
+            query (str): The query string.
+            documents (list): List of documents with 'text' and optional 'metadata'.
+
+        Returns:
+            list: Documents sorted by relevance score.
+        """
+        # Validate inputs
+        if not isinstance(query, str):
+            raise ValueError("Query must be a string.")
+        if not isinstance(documents, list) or not all(isinstance(doc, dict) for doc in documents):
+            raise ValueError("Documents must be a list of dictionaries.")
+
         query_embedding = self.model.encode(query, convert_to_tensor=True)
         results = []
         for doc in documents:
-            doc_embedding = self.model.encode(doc['text'], convert_to_tensor=True)
-            score = util.pytorch_cos_sim(query_embedding, doc_embedding).item()
+            doc_embedding = self.model.encode(doc["text"], convert_to_tensor=True)
+            score = self.util.pytorch_cos_sim(query_embedding, doc_embedding).item()
             results.append({"text": doc["text"], "metadata": doc.get("metadata", {}), "score": score})
         return sorted(results, key=lambda x: x["score"], reverse=True)
+
+    @staticmethod
+    def validate_model(model_name):
+        """
+        Validate if the specified model is available for use.
+
+        Args:
+            model_name (str): Name of the Hugging Face model.
+
+        Returns:
+            bool: True if the model is available, False otherwise.
+        """
+        from sentence_transformers import SentenceTransformer
+        try:
+            SentenceTransformer(model_name)
+            return True
+        except Exception as e:
+            print(f"Validation failed for model '{model_name}': {e}")
+            return False
+
 
 
 class HuggingFaceSemanticReranker(BaseReranker):
