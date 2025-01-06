@@ -39,18 +39,33 @@ def test_dependency_version(package, version):
         print(f"{package}=={version} failed.")
         return False
 
-
 def find_oldest_compatible_version(package, versions):
     """
-    Find the oldest compatible version of a package by testing all versions.
+    Find the oldest compatible version of a package using a binary search-like approach.
     """
-    compatible_version = None
-    for version in reversed(versions):  # Test oldest versions first
-        if test_dependency_version(package, version):
-            compatible_version = version
-            break
-    return compatible_version
+    if not versions:
+        return None
 
+    left = 0
+    right = len(versions) - 1
+    compatible_version = None
+
+    # Perform binary search until the range is small
+    while right - left > 2:
+        mid = (left + right) // 2
+        if test_dependency_version(package, versions[mid]):
+            compatible_version = versions[mid]
+            right = mid - 1  # Narrow down to the left half
+        else:
+            left = mid + 1  # Narrow down to the right half
+
+    # Traverse the remaining range to confirm the oldest compatible version
+    for i in range(left, right + 1):
+        if test_dependency_version(package, versions[i]):
+            compatible_version = versions[i]
+            break
+
+    return compatible_version
 
 def get_supported_python_versions():
     """
