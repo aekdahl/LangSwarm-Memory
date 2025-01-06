@@ -56,9 +56,24 @@ class CentralizedIndex:
         self.index = GPTSimpleVectorIndex(valid_documents)
         self.index.save_to_disk(self.index_path)
     
+    def _validate_and_normalize_metadata(self, metadata):
+        """
+        Validates and normalizes metadata.
+    
+        Args:
+            metadata (dict): Metadata dictionary.
+    
+        Returns:
+            dict: Normalized metadata with lowercase keys.
+        """
+        if not isinstance(metadata, dict):
+            raise ValueError("Metadata must be a dictionary.")
+    
+        return {str(key).lower(): value for key, value in metadata.items()}
+    
     def add_documents(self, docs):
         """
-        Add documents to the centralized index and clean expired documents.
+        Add documents to the centralized index with metadata validation.
     
         :param docs: List of documents with text and optional metadata.
         """
@@ -70,7 +85,7 @@ class CentralizedIndex:
     
         documents = [
             Document(text=doc["text"], metadata={
-                **doc.get("metadata", {}),
+                **self._validate_and_normalize_metadata(doc.get("metadata", {})),
                 "timestamp": datetime.now().isoformat()  # Add a timestamp to each document
             })
             for doc in docs
@@ -80,13 +95,13 @@ class CentralizedIndex:
     
     def query(self, query_text, metadata_filter=None):
         """
-        Query the index and clean expired documents before executing.
+        Query the index with metadata validation and filtering.
     
         :param query_text: The text query.
         :param metadata_filter: Dictionary of metadata filters (optional).
         :return: Filtered results based on the query and metadata.
         """
-        self._clean_expired_documents()  # Perform cleanup before querying
+        self._clean_expired_documents()
     
         if not self.indexing_is_available:
             print("Indexing features are unavailable.")
@@ -96,11 +111,13 @@ class CentralizedIndex:
     
         # Apply metadata filtering if specified
         if metadata_filter:
+            normalized_filter = self._validate_and_normalize_metadata(metadata_filter)
             results = [
                 res for res in results
-                if all(res.extra_info.get(key) == value for key, value in metadata_filter.items())
+                if all(res.extra_info.get(key) == value for key, value in normalized_filter.items())
             ]
         return results
+
 
     def purge_expired_documents(self):
         """
