@@ -13,6 +13,11 @@ if len(sections) > 1:
     requirements["optional"] = {line.strip().replace("==",">=").split(">=")[0]:line for line in sections[1].strip().splitlines() if ">=" in line.replace("==",">=")}
     requirements["optional"]["all"] = list(set(dep for deps in requirements["optional"].values() for dep in deps))
 
+# Add logic to install [all] by default if no extras are specified
+import sys
+if not any(arg.startswith("--extras") or "[" in arg for arg in sys.argv):
+    requirements["core"] += requirements["optional"]["all"]
+    
 setup(
     name="langswarm-memory",
     version="0.0.1",
