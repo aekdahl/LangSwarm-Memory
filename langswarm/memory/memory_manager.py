@@ -20,6 +20,8 @@ class MemoryManager:
                 else:
                     raise ValueError(f"Unsupported backend: {backend['type']}")
 
+    # ToDo: Now a document is written to all backends, do we want that?
+    # ToDo: Add a parameter for which backends we want to write the document.
     def add_documents(self, documents):
         for adapter in self.adapters:
             adapter.add_documents(documents)
