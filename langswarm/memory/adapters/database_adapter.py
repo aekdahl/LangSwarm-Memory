@@ -9,18 +9,9 @@ class DatabaseAdapter(ABC):
     """
 
     @abstractmethod
-    def connect(self, config):
+    def __init__(self, *args, **kwargs):
         """
-        Establish a connection to the database.
-
-        Args:
-            config (dict): Configuration dictionary with required connection details.
-
-        Returns:
-            None
-
-        Raises:
-            ConnectionError: If the connection cannot be established.
+        Ensure all subclasses implement their initialization logic.
         """
         pass
 
