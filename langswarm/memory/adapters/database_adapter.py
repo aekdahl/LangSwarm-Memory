@@ -25,7 +25,7 @@ class DatabaseAdapter(ABC):
         pass
 
     @abstractmethod
-    def insert(self, data):
+    def add_documents(self, data):
         """
         Insert data into the database.
 
