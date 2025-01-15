@@ -99,7 +99,7 @@ class BaseExampleAdapter(DatabaseAdapter):
         """
         print("Connected to the in-memory database.")
 
-    def insert(self, data):
+    def add_documents(self, data):
         """
         Insert data into the in-memory database.
 
