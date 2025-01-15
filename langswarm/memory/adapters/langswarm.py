@@ -139,7 +139,7 @@ class RedisAdapter(DatabaseAdapter):
 
 class ChromaDBAdapter(DatabaseAdapter):
     def __init__(self, collection_name="shared_memory", persist_directory=None):
-        if any(var is None for var in (ChromaDB)):
+        if ChromaDB is None:
             raise ValueError("Unsupported database. Make sure ChromaDB is installed.")
             
         self.client = ChromaDB(Settings(persist_directory=persist_directory))
