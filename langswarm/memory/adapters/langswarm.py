@@ -141,8 +141,10 @@ class ChromaDBAdapter(DatabaseAdapter):
     def __init__(self, collection_name="shared_memory", persist_directory=None):
         if ChromaDB is None:
             raise ValueError("Unsupported database. Make sure ChromaDB is installed.")
-            
-        self.client = ChromaDB(Settings(persist_directory=persist_directory))
+        if persist_directory:
+            self.client = ChromaDB(Settings(persist_directory=persist_directory))
+        else:
+            self.client = ChromaDB(Settings())
         self.collection = self.client.get_or_create_collection(name=collection_name)
 
     def add_documents(self, documents):
