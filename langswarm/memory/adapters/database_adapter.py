@@ -67,71 +67,24 @@ class DatabaseAdapter(ABC):
     def capabilities(self) -> Dict[str, bool]:
         raise NotImplementedError
 
-# Example implementation of the DatabaseAdapter
-class BaseExampleAdapter(DatabaseAdapter):
-    """
-    Example implementation of the DatabaseAdapter for demonstration purposes.
-
-    This is a simple in-memory adapter that stores data in a Python dictionary.
-    """
-
-    def __init__(self):
-        self._storage = {}
-
-    def connect(self, config):
+    # Adding get_relevant_documents() for LangChain integration
+    def get_relevant_documents(self, query: str, k: int = 5, filters: Dict = None) -> List[Dict]:
         """
-        Simulate a connection to a database.
+        Retrieve the most relevant documents using the query() method.
 
         Args:
-            config (dict): Configuration dictionary (not used in this example).
+            query (str): The query string for retrieval.
+            k (int): The number of documents to retrieve (default is 5).
+            filters (Dict): Additional filters for querying metadata (optional).
 
         Returns:
-            None
+            List[Dict]: A list of relevant documents.
         """
-        print("Connected to the in-memory database.")
+        # Combine query string and filters for more advanced backends
+        query_filters = {"query": query}
+        if filters:
+            query_filters.update(filters)
 
-    def add_documents(self, data):
-        """
-        Insert data into the in-memory database.
-
-        Args:
-            data (dict): The data to insert.
-
-        Returns:
-            bool: True if successful, False otherwise.
-        """
-        if 'id' not in data:
-            raise ValueError("Data must contain an 'id' field.")
-        self._storage[data['id']] = data
-        return True
-
-    def query(self, filters):
-        """
-        Query the in-memory database.
-
-        Args:
-            filters (dict): A dictionary of filters (e.g., {'field': 'value'}).
-
-        Returns:
-            list: A list of matching records.
-        """
-        results = []
-        for record in self._storage.values():
-            if all(record.get(k) == v for k, v in filters.items()):
-                results.append(record)
+        # Query the database and limit results to k
+        results = self.query(filters=query_filters)[:k]
         return results
-
-    def delete(self, identifier):
-        """
-        Delete a record from the in-memory database.
-
-        Args:
-            identifier (str): The unique identifier of the record.
-
-        Returns:
-            bool: True if successful, False otherwise.
-        """
-        if identifier not in self._storage:
-            raise KeyError(f"No record found with id '{identifier}'.")
-        del self._storage[identifier]
-        return True
