@@ -32,7 +32,7 @@ class DatabaseAdapter(ABC):
         pass
 
     @abstractmethod
-    def query(self, filters):
+    def query(self, query, filters):
         """
         Query the database using the given filters.
 
@@ -80,11 +80,6 @@ class DatabaseAdapter(ABC):
         Returns:
             List[Dict]: A list of relevant documents.
         """
-        # Combine query string and filters for more advanced backends
-        query_filters = {"query": query}
-        if filters:
-            query_filters.update(filters)
-
         # Query the database and limit results to k
-        results = self.query(filters=query_filters)[:k]
+        results = self.query(query, filters=filters)[:k]
         return results
