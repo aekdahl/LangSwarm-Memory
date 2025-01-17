@@ -83,3 +83,14 @@ class DatabaseAdapter(ABC):
         # Query the database and limit results to k
         results = self.query(query, filters=filters)[:k]
         return results
+
+    def standardize_output(text, source, metadata=None, id=None, relevance_score=None):
+    return {
+        "text": text,
+        "metadata": {
+            "source": source,
+            "relevance_score": relevance_score,
+            **(metadata or {})
+        },
+        "id": id
+    }
