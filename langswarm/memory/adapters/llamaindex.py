@@ -53,7 +53,14 @@ class LlamaIndexDiskAdapter(DatabaseAdapter):
         results = self.index.query(query)
         if filters:
             results = [res for res in results if all(res.extra_info.get(k) == v for k, v in filters.items())]
-        return results
+        
+        return self.standardize_output(
+            text=[result["content"] for result in results],
+            source="LlamaIndex",
+            metadata=[result["extra_info"] for result in results],
+            id=[result["document_id"] for result in results],
+            relevance_score=[result.get("score") for result in results]
+        )
 
     def delete(self, document_ids):
         raise NotImplementedError("Delete functionality not implemented for LlamaIndex")
@@ -94,7 +101,14 @@ class LlamaIndexPineconeAdapter(LlamaIndexAdapter):
         self.index.insert(docs)
 
     def query(self, query_text):
-        return self.index.query(query_text)
+        results = self.index.query(query_text)
+        return self.standardize_output(
+            text=[result["content"] for result in results],
+            source="LlamaIndex",
+            metadata=[result["extra_info"] for result in results],
+            id=[result["document_id"] for result in results],
+            relevance_score=[result.get("score") for result in results]
+        )
 
     def delete(self, document_ids):
         self.index.delete(document_ids)
@@ -129,7 +143,14 @@ class LlamaIndexWeaviateAdapter(LlamaIndexAdapter):
         self.index.insert(docs)
 
     def query(self, query_text):
-        return self.index.query(query_text)
+        results = self.index.query(query_text)
+        return self.standardize_output(
+            text=[result["content"] for result in results],
+            source="LlamaIndex",
+            metadata=[result["extra_info"] for result in results],
+            id=[result["document_id"] for result in results],
+            relevance_score=[result.get("score") for result in results]
+        )
 
     def delete(self, document_ids):
         raise NotImplementedError("Document deletion is not yet supported for Weaviate.")
@@ -168,7 +189,14 @@ class LlamaIndexFAISSAdapter(LlamaIndexAdapter):
         self.index.save_to_disk("faiss_index.json")
 
     def query(self, query_text):
-        return self.index.query(query_text)
+        results = self.index.query(query_text)
+        return self.standardize_output(
+            text=[result["content"] for result in results],
+            source="LlamaIndex",
+            metadata=[result["extra_info"] for result in results],
+            id=[result["document_id"] for result in results],
+            relevance_score=[result.get("score") for result in results]
+        )
 
     def delete(self, document_ids):
         raise NotImplementedError("Document deletion is not yet supported for FAISS.")
@@ -208,7 +236,14 @@ class LlamaIndexSQLAdapter(LlamaIndexAdapter):
         self.index.refresh()
 
     def query(self, query_text):
-        return self.index.query(query_text)
+        results = self.index.query(query_text)
+        return self.standardize_output(
+            text=[result["content"] for result in results],
+            source="LlamaIndex",
+            metadata=[result["extra_info"] for result in results],
+            id=[result["document_id"] for result in results],
+            relevance_score=[result.get("score") for result in results]
+        )
 
     def delete(self, document_ids):
         raise NotImplementedError("Document deletion is not yet supported for SQL.")
