@@ -61,10 +61,24 @@ class PineconeAdapter(DatabaseAdapter):
         self.db.add_texts(documents, metadatas=metadata)
         
     def query(self, query, filters=None):
-        return self.db.similarity_search(query, filter=filters)
+        result = self.db.similarity_search(query, filter=filters)
+        return self.standardize_output(
+            text=result["text"],
+            source="Pinecone",
+            metadata=result["metadata"],
+            id=result["id"],
+            relevance_score=result.get("score")
+        )
 
     def query_by_metadata(self, metadata_query, top_k=5):
-        return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
+        result = self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
+        return self.standardize_output(
+            text=result["text"],
+            source="Pinecone",
+            metadata=result["metadata"],
+            id=result["id"],
+            relevance_score=result.get("score")
+        )
         
     def delete(self, document_ids):
         for doc_id in document_ids:
@@ -111,11 +125,25 @@ class WeaviateAdapter(DatabaseAdapter):
             self.db.add_text(doc, metadata=meta)
 
     def query(self, query, filters=None):
-        return self.db.similarity_search(query, filter=filters)
-        # return self.db.query(query, filters=filters) <-- Should we use the simple query instead?        
+        result = self.db.similarity_search(query, filter=filters)
+        # result = self.db.query(query, filters=filters) <-- Should we use the simple query instead?
+        return self.standardize_output(
+            text=result["properties"].get("text"),
+            source="Weaviate",
+            metadata={k: v for k, v in result["properties"].items() if k != "text"},
+            id=result["id"],
+            relevance_score=1 - result.get("distance", 0)  # Convert distance to relevance score
+        )
 
     def query_by_metadata(self, metadata_query, top_k=5):
-        return self.db.query_by_metadata(metadata_query, top_k=top_k)
+        result = self.db.query_by_metadata(metadata_query, top_k=top_k)
+        return self.standardize_output(
+            text=result["properties"].get("text"),
+            source="Weaviate",
+            metadata={k: v for k, v in result["properties"].items() if k != "text"},
+            id=result["id"],
+            relevance_score=1 - result.get("distance", 0)  # Convert distance to relevance score
+        )
 
     def delete(self, document_ids):
         try:
@@ -159,10 +187,24 @@ class MilvusAdapter(DatabaseAdapter):
         self.db.add_texts(documents, metadatas=metadata)
 
     def query(self, query, filters=None):
-        return self.db.similarity_search(query, filter=filters)
+        result = self.db.similarity_search(query, filter=filters)
+        return self.standardize_output(
+            text=result["text"],
+            source="Milvus",
+            metadata=result["metadata"],
+            id=result["id"],
+            relevance_score=result.get("score")
+        )
 
     def query_by_metadata(self, metadata_query, top_k=5):
-        return self.db.query_by_metadata(metadata_query, top_k=top_k)
+        result = self.db.query_by_metadata(metadata_query, top_k=top_k)
+        return self.standardize_output(
+            text=result["text"],
+            source="Milvus",
+            metadata=result["metadata"],
+            id=result["id"],
+            relevance_score=result.get("score")
+        )
 
     def delete(self, document_ids):
         try:
@@ -231,7 +273,13 @@ class SQLiteAdapter(DatabaseAdapter):
         self.db.add_texts(texts, metadatas=metadata)
 
     def query(self, query, filters=None):
-        return self.db.similarity_search(query, filter=filters)
+        result = self.db.similarity_search(query, filter=filters)
+        return self.standardize_output(
+            text=result["value"],
+            source="SQLite",
+            metadata=result["metadata"],
+            id=result["key"]
+        )
 
     def delete(self, document_ids):
         self.db.delete(ids=document_ids)
@@ -260,10 +308,22 @@ class RedisAdapter(DatabaseAdapter):
         self.db.add_texts(documents, metadatas=metadata)
 
     def query(self, query, filters=None):
-        return self.db.similarity_search(query, filter=filters)
+        result = self.db.similarity_search(query, filter=filters)
+        return self.standardize_output(
+            text=result["value"]["value"],
+            source="Redis",
+            metadata=result["value"]["metadata"],
+            id=result["key"]
+        )
 
     def query_by_metadata(self, metadata_query, top_k=5):
-        return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
+        result = self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
+        return self.standardize_output(
+            text=result["value"]["value"],
+            source="Redis",
+            metadata=result["value"]["metadata"],
+            id=result["key"]
+        )
 
     def delete(self, document_ids):
         for doc_id in document_ids:
@@ -292,10 +352,22 @@ class ChromaAdapter(DatabaseAdapter):
         self.db.add_texts(documents, metadatas=metadata)
 
     def query(self, query, filters=None):
-        return self.db.similarity_search(query, filter=filters)
+        results = self.db.similarity_search(query, filter=filters)
+        return self.standardize_output(
+            text=results["documents"][0],
+            source="ChromaDB",
+            metadata=results["metadatas"][0],
+            id=results["ids"][0]
+        )
 
     def query_by_metadata(self, metadata_query, top_k=5):
-        return self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
+        results = self.db.similarity_search(query=None, filter=metadata_query, k=top_k)
+        return self.standardize_output(
+            text=results["documents"][0],
+            source="ChromaDB",
+            metadata=results["metadatas"][0],
+            id=results["ids"][0]
+        )
 
     def delete(self, document_ids):
         for doc_id in document_ids:
