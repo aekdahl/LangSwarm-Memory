@@ -79,9 +79,12 @@ class SQLiteAdapter(DatabaseAdapter):
 
             cursor.execute(sql_query, params)
             rows = cursor.fetchall()
-            return [
-                {"key": row[0], "text": row[1], "metadata": eval(row[2])} for row in rows
-            ]
+            return self.standardize_output(
+                    text=[row[1] for row in rows],
+                    source="SQLite",
+                    metadata=[eval(row[2]) for row in rows],
+                    id=[row[0] for row in rows]
+                )
 
     def delete(self, document_ids):
         with self._get_connection() as conn:
@@ -123,7 +126,13 @@ class RedisAdapter(DatabaseAdapter):
                 ):
                     continue
                 results.append({"key": key.decode(), **entry})
-        return results
+
+        return self.standardize_output(
+            text=[result["value"] for result in results],
+            source="Redis",
+            metadata=[result["metadata"] for result in results],
+            id=[result["key"] for result in results]
+        )
 
     def delete(self, document_ids):
         for doc_id in document_ids:
@@ -154,8 +163,8 @@ class ChromaDBAdapter(DatabaseAdapter):
             metadata = doc.get("metadata", {})
             self.collection.add(ids=[key], documents=[value], metadatas=[metadata])
 
-    def query(self, query, filters=None):
-        results = self.collection.query(query_text=query)
+    def query(self, query, filters=None, n=5):
+        results = self.collection.query(query_texts=query)
         if filters:
             return [
                 {
@@ -168,7 +177,13 @@ class ChromaDBAdapter(DatabaseAdapter):
                     res["metadata"].get(k) == v for k, v in filters.items()
                 )
             ]
-        return results
+        
+        return self.standardize_output(
+            text=results["documents"][0],
+            source="ChromaDB",
+            metadata=results["metadatas"][0],
+            id=results["ids"][0]
+        )
 
     def delete(self, document_ids):
         for doc_id in document_ids:
@@ -210,7 +225,13 @@ class GCSAdapter(DatabaseAdapter):
                 ):
                     continue
                 results.append({"key": blob.name[len(self.prefix):], **entry})
-        return results
+
+        return self.standardize_output(
+            text=[result["value"] for result in results],
+            source="GCS",
+            metadata=[result["metadata"] for result in results],
+            id=[result["key"] for result in results]
+        )
 
     def delete(self, document_ids):
         for doc_id in document_ids:
@@ -245,11 +266,25 @@ class ElasticsearchAdapter(DatabaseAdapter):
         body = {"query": {"match": {"text": query}}}
         if filters:
             body["query"] = {"bool": {"must": [{"match": {"text": query}}], "filter": [{"term": filters}]}}
-        return self.db.search(index="documents", body=body)
+        result = self.db.search(index="documents", body=body)
+        return self.standardize_output(
+            text=result["_source"]["text"],
+            source="Elasticsearch",
+            metadata={k: v for k, v in result["_source"].items() if k != "text"},
+            id=result["_id"],
+            relevance_score=result.get("_score")
+        )
 
     def query_by_metadata(self, metadata_query, top_k=5):
         body = {"query": {"bool": {"filter": [{"term": metadata_query}]}}}
-        return self.db.search(index="documents", body=body, size=top_k)
+        result = self.db.search(index="documents", body=body, size=top_k)
+        return self.standardize_output(
+            text=result["_source"]["text"],
+            source="Elasticsearch",
+            metadata={k: v for k, v in result["_source"].items() if k != "text"},
+            id=result["_id"],
+            relevance_score=result.get("_score")
+        )
 
     def delete(self, document_ids):
         for doc_id in document_ids:
