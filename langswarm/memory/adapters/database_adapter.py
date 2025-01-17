@@ -85,12 +85,12 @@ class DatabaseAdapter(ABC):
         return results
 
     def standardize_output(text, source, metadata=None, id=None, relevance_score=None):
-    return {
-        "text": text,
-        "metadata": {
-            "source": source,
-            "relevance_score": relevance_score,
-            **(metadata or {})
-        },
-        "id": id
-    }
+        return {
+            "text": text,
+            "metadata": {
+                "source": source,
+                "relevance_score": relevance_score,
+                **(metadata or {})
+            },
+            "id": id
+        }
