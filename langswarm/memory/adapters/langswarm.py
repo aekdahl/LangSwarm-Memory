@@ -29,7 +29,56 @@ except ImportError:
 
 
 class SQLiteAdapter(DatabaseAdapter):
+    """
+    A lightweight document store for managing structured text retrieval using SQLite.
+
+    This retriever enables:
+    - Storing and retrieving text documents efficiently.
+    - Performing SQL-based keyword searches with metadata filtering.
+    - Managing document storage with insertion, querying, and deletion operations.
+
+    Use cases:
+    - Storing structured memory for AI agents.
+    - Fast retrieval of past interactions or logs.
+    - Querying metadata-enriched text databases.
+    """
+    
     def __init__(self, db_path="memory.db"):
+        super().__init__(
+            name="SQLiteRetriever",
+            description=(
+                "This retriever enables document storage and retrieval using SQLite. "
+                "It supports keyword-based searching, metadata filtering, and structured querying. "
+                "Ideal for managing structured agent memory or log-based retrieval."
+            ),
+            instruction="""
+- **Actions and Parameters**:
+    - `add_documents`: Add documents to SQLite.
+      - Parameters:
+        - `documents` (List[Dict]): A list of dictionaries with keys `"key"`, `"text"`, and optional `"metadata"`.
+
+    - `query`: Perform a keyword-based SQL search.
+      - Parameters:
+        - `query` (str): The text query for retrieval.
+        - `filters` (Dict, optional): Metadata filters for refining results.
+
+    - `delete`: Remove documents from SQLite by ID.
+      - Parameters:
+        - `document_ids` (List[str]): A list of document keys to remove.
+
+- **Usage format**:
+```
+use retriever:name|action|{"query": "Example text"}
+```
+Replace `name`, `action`, and parameters as needed.
+
+Example:
+- To retrieve documents related to a query:
+```
+use retriever:sqlite_retriever|query|{"query": "Customer feedback"}
+```
+        """
+        )
         if any(var is None for var in (sqlite3)):
             raise ValueError("Unsupported database. Make sure sqlite3 is installed.")
             
@@ -53,6 +102,25 @@ class SQLiteAdapter(DatabaseAdapter):
     def _get_connection(self):
         return sqlite3.connect(self.db_path)
 
+    def run(self, payload, action="query"):
+        """
+        Execute retrieval actions.
+        :param payload: Dict - The input query parameters.
+        :param action: str - The action to perform: 'query', 'add_documents', or 'delete'.
+        :return: str - The result of the action.
+        """
+        if action == "query":
+            return self.query(**payload)
+        elif action == "add_documents":
+            return self.add_documents(**payload)
+        elif action == "delete":
+            return self.delete(**payload)
+        else:
+            return (
+                f"Unsupported action: {action}. Available actions are:\n\n"
+                f"{self.instruction}"
+            )
+    
     def add_documents(self, documents):
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -102,12 +170,79 @@ class SQLiteAdapter(DatabaseAdapter):
 
 
 class RedisAdapter(DatabaseAdapter):
+    """
+    A fast key-value document store for structured retrieval using Redis.
+
+    This retriever enables:
+    - Storing and retrieving text documents efficiently.
+    - Performing keyword searches with metadata filtering.
+    - Managing document storage with insertion, querying, and deletion operations.
+
+    Use cases:
+    - Storing structured memory for AI agents.
+    - Fast retrieval of past interactions or logs.
+    - Querying metadata-enriched Redis storage.
+    """
     def __init__(self, redis_url="redis://localhost:6379/0"):
+        super().__init__(
+            name="RedisRetriever",
+            description=(
+                "This retriever enables document storage and retrieval using Redis. "
+                "It supports keyword-based searching and metadata filtering. "
+                "Ideal for real-time caching and AI memory management."
+            ),
+            instruction="""
+- **Actions and Parameters**:
+    - `add_documents`: Add documents to Redis.
+      - Parameters:
+        - `documents` (List[Dict]): A list of dictionaries with keys `"key"`, `"text"`, and optional `"metadata"`.
+
+    - `query`: Perform a keyword-based Redis search.
+      - Parameters:
+        - `query` (str): The text query for retrieval.
+        - `filters` (Dict, optional): Metadata filters for refining results.
+
+    - `delete`: Remove documents from Redis by ID.
+      - Parameters:
+        - `document_ids` (List[str]): A list of document keys to remove.
+
+- **Usage format**:
+```
+use retriever:name|action|{"query": "Example text"}
+```
+Replace `name`, `action`, and parameters as needed.
+
+Example:
+- To retrieve documents related to a query:
+```
+use retriever:redis_retriever|query|{"query": "Customer feedback"}
+```
+        """
+        )
         if any(var is None for var in (redis)):
             raise ValueError("Unsupported database. Make sure sqlite3 is installed.")
             
         self.client = redis.StrictRedis.from_url(redis_url)
 
+    def run(self, payload, action="query"):
+        """
+        Execute retrieval actions.
+        :param payload: Dict - The input query parameters.
+        :param action: str - The action to perform: 'query', 'add_documents', or 'delete'.
+        :return: str - The result of the action.
+        """
+        if action == "query":
+            return self.query(**payload)
+        elif action == "add_documents":
+            return self.add_documents(**payload)
+        elif action == "delete":
+            return self.delete(**payload)
+        else:
+            return (
+                f"Unsupported action: {action}. Available actions are:\n\n"
+                f"{self.instruction}"
+            )
+    
     def add_documents(self, documents):
         for doc in documents:
             key = doc.get("key", "")
@@ -146,8 +281,58 @@ class RedisAdapter(DatabaseAdapter):
         }
 
     
+
 class ChromaDBAdapter(DatabaseAdapter):
+    """
+    A high-performance vector database adapter for semantic search using ChromaDB.
+
+    This retriever enables:
+    - Storing and retrieving vector-embedded documents.
+    - Performing semantic and metadata-based search.
+    - Managing indexed collections efficiently.
+
+    Use cases:
+    - AI memory retrieval and context-aware responses.
+    - Fast, scalable semantic search for LLMs.
+    - Querying documents with metadata-based filtering.
+    """
+
     def __init__(self, collection_name="shared_memory", persist_directory=None):
+        super().__init__(
+            name="ChromaDBRetriever",
+            description=(
+                "This retriever enables semantic search using ChromaDB, optimized for AI memory retrieval. "
+                "It supports vector-based similarity search, metadata filtering, and document management."
+            ),
+            instruction="""
+- **Actions and Parameters**:
+    - `add_documents`: Store documents in ChromaDB.
+      - Parameters:
+        - `documents` (List[Dict]): A list of dictionaries with `"key"`, `"text"`, and `"metadata"`.
+
+    - `query`: Perform a semantic search.
+      - Parameters:
+        - `query` (str): The search query.
+        - `filters` (Dict, optional): Metadata filters for refining results.
+        - `n` (int, optional): Number of results to retrieve (default: 5).
+
+    - `delete`: Remove documents by ID.
+      - Parameters:
+        - `document_ids` (List[str]): A list of document IDs to delete.
+
+- **Usage format**:
+```
+use retriever:name|action|{"query": "Find related research papers"}
+```
+Replace `name`, `action`, and parameters as needed.
+
+Example:
+- To retrieve the most relevant documents:
+```
+use retriever:chromadb_retriever|query|{"query": "Quantum computing advances"}
+```
+        """
+        )
         if ChromaDB is None:
             raise ValueError("Unsupported database. Make sure ChromaDB is installed.")
         if persist_directory:
@@ -156,6 +341,25 @@ class ChromaDBAdapter(DatabaseAdapter):
             self.client = ChromaDB(Settings())
         self.collection = self.client.get_or_create_collection(name=collection_name)
 
+    def run(self, payload, action="query"):
+        """
+        Execute retrieval actions.
+        :param payload: Dict - The input query parameters.
+        :param action: str - The action to perform: 'query', 'add_documents', or 'delete'.
+        :return: str - The result of the action.
+        """
+        if action == "query":
+            return self.query(**payload)
+        elif action == "add_documents":
+            return self.add_documents(**payload)
+        elif action == "delete":
+            return self.delete(**payload)
+        else:
+            return (
+                f"Unsupported action: {action}. Available actions are:\n\n"
+                f"{self.instruction}"
+            )
+    
     def add_documents(self, documents):
         for doc in documents:
             key = doc.get("key", "")
@@ -198,7 +402,55 @@ class ChromaDBAdapter(DatabaseAdapter):
 
 
 class GCSAdapter(DatabaseAdapter):
+    """
+    A Google Cloud Storage (GCS) adapter for document storage and retrieval.
+
+    This retriever enables:
+    - Storing and retrieving textual data in GCS.
+    - Metadata-based filtering for improved query results.
+    - Secure cloud-based document management.
+
+    Use cases:
+    - Storing AI-generated context and memory snapshots.
+    - Retrieving relevant stored documents for LLM interactions.
+    - Metadata-filtered searches on stored text documents.
+    """
+    
     def __init__(self, bucket_name, prefix="shared_memory/"):
+        super().__init__(
+            name="GCSRetriever",
+            description=(
+                "This retriever enables document storage and retrieval using Google Cloud Storage (GCS). "
+                "It supports metadata filtering and secure, scalable text storage for AI-driven applications."
+            ),
+            instruction="""
+- **Actions and Parameters**:
+    - `add_documents`: Store documents in GCS.
+      - Parameters:
+        - `documents` (List[Dict]): A list of dictionaries with `"key"`, `"text"`, and `"metadata"`.
+
+    - `query`: Retrieve stored documents matching the query.
+      - Parameters:
+        - `query` (str): The search query.
+        - `filters` (Dict, optional): Metadata filters for refining results.
+
+    - `delete`: Remove documents from GCS.
+      - Parameters:
+        - `document_ids` (List[str]): A list of document IDs to delete.
+
+- **Usage format**:
+```
+use retriever:name|action|{"query": "Retrieve meeting notes"}
+```
+Replace `name`, `action`, and parameters as needed.
+
+Example:
+- To retrieve stored documents:
+```
+use retriever:gcs_retriever|query|{"query": "Financial reports Q4"}
+```
+        """
+        )
         if any(var is None for var in (storage)):
             raise ValueError("Unsupported database. Make sure google cloud storage is installed.")
             
@@ -206,6 +458,25 @@ class GCSAdapter(DatabaseAdapter):
         self.bucket = self.client.bucket(bucket_name)
         self.prefix = prefix
 
+    def run(self, payload, action="query"):
+        """
+        Execute retrieval actions.
+        :param payload: Dict - The input query parameters.
+        :param action: str - The action to perform: 'query', 'add_documents', or 'delete'.
+        :return: str - The result of the action.
+        """
+        if action == "query":
+            return self.query(**payload)
+        elif action == "add_documents":
+            return self.add_documents(**payload)
+        elif action == "delete":
+            return self.delete(**payload)
+        else:
+            return (
+                f"Unsupported action: {action}. Available actions are:\n\n"
+                f"{self.instruction}"
+            )
+    
     def add_documents(self, documents):
         for doc in documents:
             key = f"{self.prefix}{doc.get('key', '')}"
@@ -248,12 +519,79 @@ class GCSAdapter(DatabaseAdapter):
 
 
 class ElasticsearchAdapter(DatabaseAdapter):
+    """
+    An Elasticsearch adapter for document storage and retrieval.
+
+    This retriever enables:
+    - Full-text search and metadata-based filtering.
+    - Vector search for similarity matching (if enabled).
+    - Scalable storage for structured and unstructured data.
+
+    Use cases:
+    - Storing and retrieving AI-generated knowledge graphs.
+    - Enabling hybrid search with metadata and embeddings.
+    - Querying structured text data in real-time.
+    """
+    
     def __init__(self, *args, **kwargs):
+        super().__init__(
+            name="ElasticsearchRetriever",
+            description=(
+                "This retriever allows querying and storing documents in Elasticsearch. "
+                "It supports full-text search, metadata filtering, and can be extended for vector search."
+            ),
+            instruction="""
+- **Actions and Parameters**:
+    - `add_documents`: Store documents in Elasticsearch.
+      - Parameters:
+        - `documents` (List[Dict]): A list of dictionaries with `"text"` and optional `"metadata"`.
+
+    - `query`: Perform a search query.
+      - Parameters:
+        - `query` (str): The text query for full-text search.
+        - `filters` (Dict, optional): Metadata-based filtering criteria.
+
+    - `delete`: Remove documents by ID.
+      - Parameters:
+        - `document_ids` (List[str]): A list of document IDs to delete.
+
+- **Usage format**:
+```
+use retriever:name|action|{"query": "Find recent articles on AI"}
+```
+Replace `name`, `action`, and parameters as needed.
+
+Example:
+- To perform a search:
+```
+use retriever:elasticsearch_retriever|query|{"query": "Latest advancements in deep learning"}
+```
+        """
+        )
         if Elasticsearch:
             self.db = Elasticsearch(kwargs["connection_string"])
         else:
             raise ValueError("Elasticsearch package is not installed.")
 
+    def run(self, payload, action="query"):
+        """
+        Execute retrieval actions.
+        :param payload: Dict - The input query parameters.
+        :param action: str - The action to perform: 'query', 'add_documents', or 'delete'.
+        :return: str - The result of the action.
+        """
+        if action == "query":
+            return self.query(**payload)
+        elif action == "add_documents":
+            return self.add_documents(**payload)
+        elif action == "delete":
+            return self.delete(**payload)
+        else:
+            return (
+                f"Unsupported action: {action}. Available actions are:\n\n"
+                f"{self.instruction}"
+            )
+    
     def add_documents(self, documents):
         for doc in documents:
             self.db.index(index="documents", body={"text": doc["text"], "metadata": doc.get("metadata", {})})

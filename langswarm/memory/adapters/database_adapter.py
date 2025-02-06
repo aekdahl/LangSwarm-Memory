@@ -1,19 +1,27 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List
 
+# ToDo: Make sure all implementations of DatabaseAdapter.query accepts a k=n parameter.
+
 class DatabaseAdapter(ABC):
     """
     Abstract base class for database adapters.
 
     Defines the interface that all database adapters must implement.
     """
+    
+    def __init__(self, name, description, instruction):
+        self.name = name
+        self.description = description
+        self.instruction = instruction
 
-    @abstractmethod
-    def __init__(self, *args, **kwargs):
-        """
-        Ensure all subclasses implement their initialization logic.
-        """
-        pass
+    def use(self, *args, **kwargs):
+        """Override this method to execute the rag."""
+        raise NotImplementedError("This method should be implemented in a subclass.")
+
+    def run(self, *args, **kwargs):
+        """Redirects to the `use` method for rag."""
+        return self.use(*args, **kwargs)
 
     @abstractmethod
     def add_documents(self, data):
@@ -81,8 +89,12 @@ class DatabaseAdapter(ABC):
             List[Dict]: A list of relevant documents.
         """
         # Query the database and limit results to k
-        results = self.query(query, filters=filters)[:k]
+        results = self.query(query, filters=filters, k=k)
         return results
+    
+    def _has_stored_files(self, query):
+        """Check if the vector database contains any stored files."""
+        return bool(self.query(query, k=1))
 
     def standardize_output(self, text, source, metadata=None, id=None, relevance_score=None):
         return {
