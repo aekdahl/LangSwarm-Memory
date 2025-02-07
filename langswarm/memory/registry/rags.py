@@ -22,7 +22,7 @@ class RAGRegistry:
         self.rags = {}
         self.embeddings = {}
 
-    def register_rag(self, rag_name: str, rag):
+    def register_rag(self, rag):
         """
         Register a new rag and generate its embedding.
 
@@ -31,6 +31,7 @@ class RAGRegistry:
                            It must have a `description` attribute.
         :raises ValueError: If the rag is already registered or lacks a description.
         """
+        rag_name = rag.identifier
         if rag_name in self.rags:
             raise ValueError(f"RAG '{rag_name}' is already registered.")
         if not hasattr(rag, "description"):

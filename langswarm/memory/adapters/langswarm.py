@@ -43,7 +43,8 @@ class SQLiteAdapter(DatabaseAdapter):
     - Querying metadata-enriched text databases.
     """
     
-    def __init__(self, db_path="memory.db"):
+    def __init__(self, identifier, db_path="memory.db"):
+        self.identifier = identifier
         super().__init__(
             name="SQLiteRetriever",
             description=(
@@ -183,7 +184,8 @@ class RedisAdapter(DatabaseAdapter):
     - Fast retrieval of past interactions or logs.
     - Querying metadata-enriched Redis storage.
     """
-    def __init__(self, redis_url="redis://localhost:6379/0"):
+    def __init__(self, identifier, redis_url="redis://localhost:6379/0"):
+        self.identifier = identifier
         super().__init__(
             name="RedisRetriever",
             description=(
@@ -297,7 +299,8 @@ class ChromaDBAdapter(DatabaseAdapter):
     - Querying documents with metadata-based filtering.
     """
 
-    def __init__(self, collection_name="shared_memory", persist_directory=None):
+    def __init__(self, identifier, collection_name="shared_memory", persist_directory=None):
+        self.identifier = identifier
         super().__init__(
             name="ChromaDBRetriever",
             description=(
@@ -416,7 +419,8 @@ class GCSAdapter(DatabaseAdapter):
     - Metadata-filtered searches on stored text documents.
     """
     
-    def __init__(self, bucket_name, prefix="shared_memory/"):
+    def __init__(self, identifier, bucket_name, prefix="shared_memory/"):
+        self.identifier = identifier
         super().__init__(
             name="GCSRetriever",
             description=(
@@ -533,7 +537,8 @@ class ElasticsearchAdapter(DatabaseAdapter):
     - Querying structured text data in real-time.
     """
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, identifier, *args, **kwargs):
+        self.identifier = identifier
         super().__init__(
             name="ElasticsearchRetriever",
             description=(

@@ -49,12 +49,13 @@ class LlamaIndexDiskAdapter(DatabaseAdapter):
     - Running offline document retrieval for AI agents.
     """
     
-    def __init__(self, index_path="index.json"):
+    def __init__(self, identifier, index_path="index.json"):
         """
         Initialize the LlamaIndex adapter with a local index.
 
         :param index_path: str - Path to the stored LlamaIndex JSON file.
         """
+        self.identifier = identifier
         super().__init__(
             name="LlamaIndexRetriever",
             description=(
@@ -165,12 +166,13 @@ class LlamaIndexPineconeAdapter(LlamaIndexAdapter):
     Usage:
         Add, query, and manage documents in a Pinecone-backed vector index.
     """
-    def __init__(self, index_name="pinecone-index"):
+    def __init__(self, identifier, index_name="pinecone-index"):
         """
         Initialize the Pinecone-backed LlamaIndex retriever.
 
         :param index_name: str - Name of the Pinecone index.
         """
+        self.identifier = identifier
         super().__init__(
             name="LlamaIndexPineconeRetriever",
             description=(
@@ -278,12 +280,13 @@ class LlamaIndexWeaviateAdapter(LlamaIndexAdapter):
     Usage:
         Add, query, and manage documents in a Weaviate-backed vector index.
     """
-    def __init__(self, weaviate_url):
+    def __init__(self, identifier, weaviate_url):
         """
         Initialize the Weaviate-backed LlamaIndex retriever.
 
         :param weaviate_url: str - The URL of the Weaviate instance.
         """
+        self.identifier = identifier
         super().__init__(
             name="LlamaIndexWeaviateRetriever",
             description=(
@@ -386,12 +389,13 @@ class LlamaIndexFAISSAdapter(LlamaIndexAdapter):
     Usage:
         Add, query, and manage documents in a FAISS-backed vector index.
     """
-    def __init__(self, index_path="faiss_index.json"):
+    def __init__(self, identifier, index_path="faiss_index.json"):
         """
         Initialize the FAISS-backed LlamaIndex retriever.
 
         :param index_path: str - The file path for storing FAISS index data.
         """
+        self.identifier = identifier
         super().__init__(
             name="LlamaIndexFAISSRetriever",
             description=(
@@ -499,13 +503,14 @@ class LlamaIndexSQLAdapter(LlamaIndexAdapter):
     Usage:
         Add, query, and manage documents in a SQL-backed index.
     """
-    def __init__(self, database_uri, index_path="sql_index.json"):
+    def __init__(self, identifier, database_uri, index_path="sql_index.json"):
         """
         Initialize the SQL-backed LlamaIndex retriever.
 
         :param database_uri: str - The SQLAlchemy-compatible database connection URI.
         :param index_path: str - The file path for storing SQL index metadata.
         """
+        self.identifier = identifier
         super().__init__(
             name="LlamaIndexSQLRetriever",
             description=(

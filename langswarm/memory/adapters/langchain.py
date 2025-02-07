@@ -60,7 +60,8 @@ class PineconeAdapter(DatabaseAdapter):
     - Filtering documents based on structured metadata queries.
     """
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, identifier, *args, **kwargs):
+        self.identifier = identifier
         super().__init__(
             name="PineconeRetriever",
             description=(
@@ -195,7 +196,8 @@ class WeaviateAdapter(DatabaseAdapter):
     - Retrieving semantically similar text passages.
     - Filtering documents based on structured metadata queries.
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, identifier, *args, **kwargs):
+        self.identifier = identifier
         super().__init__(
             name="WeaviateRetriever",
             description=(
@@ -337,7 +339,8 @@ class MilvusAdapter(DatabaseAdapter):
     - Filtering documents based on structured metadata queries.
     """
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, identifier, *args, **kwargs):
+        self.identifier = identifier
         super().__init__(
             name="MilvusRetriever",
             description=(
@@ -479,7 +482,8 @@ class QdrantAdapter(DatabaseAdapter):
     - Retrieving semantically similar text passages.
     - Filtering documents based on structured metadata queries.
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, identifier, *args, **kwargs):
+        self.identifier = identifier
         super().__init__(
             name="QdrantRetriever",
             description=(
@@ -579,7 +583,8 @@ class SQLiteAdapter(DatabaseAdapter):
     - Querying documents with both text and metadata constraints.
     """
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, identifier, *args, **kwargs):
+        self.identifier = identifier
         super().__init__(
             name="SQLiteRetriever",
             description=(
@@ -684,7 +689,8 @@ class RedisAdapter(DatabaseAdapter):
     - Querying documents with both text and metadata constraints.
     """
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, identifier, *args, **kwargs):
+        self.identifier = identifier
         super().__init__(
             name="RedisRetriever",
             description=(
@@ -794,7 +800,8 @@ class ChromaAdapter(DatabaseAdapter):
     - Querying documents using embeddings and metadata constraints.
     """
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, identifier, *args, **kwargs):
+        self.identifier = identifier
         super().__init__(
             name="ChromaRetriever",
             description=(
