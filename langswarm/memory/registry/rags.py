@@ -16,8 +16,6 @@ class RAGRegistry:
         :param embedding_model: A callable that generates embeddings for a given text.
                                 Defaults to SentenceTransformer's 'all-MiniLM-L6-v2'.
         """
-        # Use the provided embedding model or load the default one
-        self.included_rags = set()  # Tracks rags already introduced
         self.embedding_model = embedding_model or SentenceTransformer('all-MiniLM-L6-v2').encode
         self.rags = {}
         self.embeddings = {}
@@ -61,9 +59,9 @@ class RAGRegistry:
         """
         List all registered rags.
 
-        :return: A list of rag names.
+        :return: A list of rag names and briefs.
         """
-        return list(self.rags.keys())
+        return [f"{k} - {v['brief']}" for k, v in self.rags.items()]
 
     def remove_rag(self, rag_name: str):
         """
@@ -85,6 +83,12 @@ class RAGRegistry:
         :param top_k: Number of top results to return.
         :return: A list of matching rags, sorted by similarity score.
         """
+        # Check if query is a single word and exists in rags
+        if query.isalnum() and query in self.rags:
+            rag = self.rags.get(query)
+            if rag:
+                return [{"name": query, "description": rag.description, "instruction": rag.instruction}]
+
         query_embedding = self.embedding_model(query)
         rag_names = list(self.embeddings.keys())
         rag_embeddings = np.array([self.embeddings[name] for name in rag_names])
@@ -93,9 +97,6 @@ class RAGRegistry:
         similarities = cosine_similarity([query_embedding], rag_embeddings)[0]
         ranked_indices = np.argsort(similarities)[::-1][:top_k]
 
-        # Mark these rags as included
-        self.included_rags.update([rag_names[i] for i in ranked_indices])
-        
         return [
             {
                 "name": rag_names[i],
@@ -105,10 +106,3 @@ class RAGRegistry:
             }
             for i in ranked_indices
         ]
-
-    def reset_context(self):
-        """
-        Reset the included rags, clearing the context.
-        """
-        self.included_rags.clear()
-        print("Context reset: All included rags cleared.")

@@ -56,6 +56,9 @@ class LlamaIndexDiskAdapter(DatabaseAdapter):
         :param index_path: str - Path to the stored LlamaIndex JSON file.
         """
         self.identifier = identifier
+        self.brief = (
+            f"LlamaIndexRetriever"
+        )
         super().__init__(
             name="LlamaIndexRetriever",
             description=(
@@ -173,6 +176,9 @@ class LlamaIndexPineconeAdapter(LlamaIndexAdapter):
         :param index_name: str - Name of the Pinecone index.
         """
         self.identifier = identifier
+        self.brief = (
+            f"LlamaIndexPineconeRetriever"
+        )
         super().__init__(
             name="LlamaIndexPineconeRetriever",
             description=(
@@ -287,6 +293,9 @@ class LlamaIndexWeaviateAdapter(LlamaIndexAdapter):
         :param weaviate_url: str - The URL of the Weaviate instance.
         """
         self.identifier = identifier
+        self.brief = (
+            f"LlamaIndexWeaviateRetriever"
+        )
         super().__init__(
             name="LlamaIndexWeaviateRetriever",
             description=(
@@ -396,6 +405,9 @@ class LlamaIndexFAISSAdapter(LlamaIndexAdapter):
         :param index_path: str - The file path for storing FAISS index data.
         """
         self.identifier = identifier
+        self.brief = (
+            f"LlamaIndexFAISSRetriever"
+        )
         super().__init__(
             name="LlamaIndexFAISSRetriever",
             description=(
@@ -511,6 +523,9 @@ class LlamaIndexSQLAdapter(LlamaIndexAdapter):
         :param index_path: str - The file path for storing SQL index metadata.
         """
         self.identifier = identifier
+        self.brief = (
+            f"LlamaIndexSQLRetriever"
+        )
         super().__init__(
             name="LlamaIndexSQLRetriever",
             description=(

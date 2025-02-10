@@ -62,6 +62,9 @@ class PineconeAdapter(DatabaseAdapter):
     
     def __init__(self, identifier, *args, **kwargs):
         self.identifier = identifier
+        self.brief = (
+            f"PineconeRetriever"
+        )
         super().__init__(
             name="PineconeRetriever",
             description=(
@@ -198,6 +201,9 @@ class WeaviateAdapter(DatabaseAdapter):
     """
     def __init__(self, identifier, *args, **kwargs):
         self.identifier = identifier
+        self.brief = (
+            f"WeaviateRetriever"
+        )
         super().__init__(
             name="WeaviateRetriever",
             description=(
@@ -341,6 +347,9 @@ class MilvusAdapter(DatabaseAdapter):
     
     def __init__(self, identifier, *args, **kwargs):
         self.identifier = identifier
+        self.brief = (
+            f"MilvusRetriever"
+        )
         super().__init__(
             name="MilvusRetriever",
             description=(
@@ -484,6 +493,9 @@ class QdrantAdapter(DatabaseAdapter):
     """
     def __init__(self, identifier, *args, **kwargs):
         self.identifier = identifier
+        self.brief = (
+            f"QdrantRetriever"
+        )
         super().__init__(
             name="QdrantRetriever",
             description=(
@@ -585,6 +597,9 @@ class SQLiteAdapter(DatabaseAdapter):
     
     def __init__(self, identifier, *args, **kwargs):
         self.identifier = identifier
+        self.brief = (
+            f"SQLiteRetriever"
+        )
         super().__init__(
             name="SQLiteRetriever",
             description=(
@@ -691,6 +706,9 @@ class RedisAdapter(DatabaseAdapter):
     
     def __init__(self, identifier, *args, **kwargs):
         self.identifier = identifier
+        self.brief = (
+            f"RedisRetriever"
+        )
         super().__init__(
             name="RedisRetriever",
             description=(
@@ -802,6 +820,9 @@ class ChromaAdapter(DatabaseAdapter):
     
     def __init__(self, identifier, *args, **kwargs):
         self.identifier = identifier
+        self.brief = (
+            f"ChromaRetriever"
+        )
         super().__init__(
             name="ChromaRetriever",
             description=(
