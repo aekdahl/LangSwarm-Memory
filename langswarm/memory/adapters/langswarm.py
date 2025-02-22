@@ -379,7 +379,7 @@ use retriever:chromadb_retriever|query|{"query": "Quantum computing advances"}
             metadata = doc.get("metadata", {})
             self.collection.add(ids=[key], documents=[value], metadatas=[metadata])
 
-    def query(self, query, filters=None, n=5):
+    def query(self, query, filters=None, n=5, where=None):        results = self.collection.query(query_texts=query, where=where)
         results = self.collection.query(query_texts=query)
         if filters:
             return [
