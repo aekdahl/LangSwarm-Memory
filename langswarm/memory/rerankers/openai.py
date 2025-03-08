@@ -1,4 +1,4 @@
-from memory.rerankers.rerank import BaseReranker  # Import missing base class.
+from memory.rerankers.base import BaseReranker  # Import missing base class.
 
 class OpenAIReranker(BaseReranker):
     """

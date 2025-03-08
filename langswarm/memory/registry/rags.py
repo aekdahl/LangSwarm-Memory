@@ -61,7 +61,7 @@ class RAGRegistry:
 
         :return: A list of rag names and briefs.
         """
-        return [f"{k} - {v['brief']}" for k, v in self.rags.items()]
+        return [f"{k} - {v.brief}" for k, v in self.rags.items()]
 
     def remove_rag(self, rag_name: str):
         """

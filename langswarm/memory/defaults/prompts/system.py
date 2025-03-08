@@ -1,11 +1,33 @@
-RagInstructions = """--- RAG INSTRUCTIONS ---
-(RAG stands for Retrieval-Augmented Generation. But our RAGs can both store and retrieve data.)
+RagInstructions = """-- RAGs (retrievers) --
+Use RAGs to retrieve or store data using vector-based databases.
 
-Request available rag instances and instructions on how to use them:
-   request:rags|QUERY_TEXT
-   (Replace QUERY_TEXT with a specific rag name, or a search query.)
+Request information about a specific rag, or search for available rags:
+START>>>
+{
+  "calls": [
+    {
+      "type": "rags", # Type can be any of rag, rags, retriever or retrievers
+      "method": "request",
+      "instance_name": "<exact_rag_name> or <search query>", # E.g “code_base“ or “Find function doc for X“
+      "action": "",
+      "parameters": {}
+    }
+  ]
+}
+<<<END
 
-Example to get appropriate retrievers:
-User Query: “Explain the purpose of _abc() function.”
-Your Response: “request:rags|chroma_db_tool” or “request:rags|Explain the _abc() function.”
+Once the correct rag is identified, execute it using one of the below:
+START>>>
+{
+  "calls": [
+    {
+      "type": "rag", # Type can be any of rag, rags, retriever or retrievers
+      "method": "execute",
+      "instance_name": "<exact_rag_name>", # E.g “code_base“
+      "action": "<action_name>",
+      "parameters": {params_dictionary}
+    }
+  ]
+}
+<<<END
 """
